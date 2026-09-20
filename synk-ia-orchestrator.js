@@ -338,30 +338,95 @@ function recordPerformanceMetric(toolName, taskType, duration, success) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PROVIDER REGISTRY — REAL inference paths (single source of truth)
-// ─────────────────────────────────────────────────────────────────────────────
+// Chain de providers FREE: openrouter → nvidia → groq → mistral → cohere (todos OpenAI-compat)
+// Más local-fallback: lmstudio → ollama
+// ─────────────────────────────────────────────────────────────────────────
 
 const PROVIDERS = {
   ollama: {
     type: 'ollama',
     base_url: process.env.OLLAMA_URL || 'http://127.0.0.1:11435',
     default_model: process.env.OLLAMA_MODEL || 'llama3.2:3b',
-    tier: 'local-free'
+    tier: 'local-free',
+    free_tier: false
   },
   lmstudio: {
     type: 'openai',
     base_url: process.env.LMSTUDIO_URL || 'http://127.0.0.1:1234/v1',
     api_key: process.env.LMSTUDIO_API_KEY || 'lm-studio',
     default_model: process.env.LMSTUDIO_CHAT_MODEL || 'prism-ml/bonsai-27b',
-    tier: 'local-free'
+    tools_supported: true,
+    tier: 'local-free',
+    free_tier: false
   },
   openrouter: {
     type: 'openai',
     base_url: 'https://openrouter.ai/api/v1',
     api_key: process.env.OPENROUTER_API_KEY || '',
     default_model: process.env.OPENROUTER_DEFAULT_MODEL || 'deepseek/deepseek-v4-flash-0731:free',
-    tier: 'cloud-free'
+    tier: 'cloud-free',
+    tools_supported: true,
+    free_tier: true
+  },
+  nvidia: {
+    type: 'openai',
+    base_url: 'https://integrate.api.nvidia.com/v1',
+    api_key: process.env.NVIDIA_API_KEY || '',
+    default_model: process.env.NVIDIA_DEFAULT_MODEL || 'meta/llama-3.1-70b-instruct',
+    tier: 'cloud-free',
+    tools_supported: false,
+    free_tier: true,
+    requires_credit_setup: 'https://build.nvidia.com/'
+  },
+  groq: {
+    type: 'openai',
+    base_url: 'https://api.groq.com/openai/v1',
+    api_key: process.env.GROQ_API_KEY || '',
+    default_model: process.env.GROQ_DEFAULT_MODEL || 'llama-3.1-70b-versatile',
+    tier: 'cloud-free',
+    tools_supported: true,
+    free_tier: true,
+    rate_limit: '30 req/min'
+  },
+  cohere: {
+    type: 'openai',
+    base_url: 'https://api.cohere.com/compatibility/v1',
+    api_key: process.env.COHERE_API_KEY || '',
+    default_model: process.env.COHERE_DEFAULT_MODEL || 'command-r-plus',
+    tier: 'cloud-free',
+    tools_supported: false,
+    free_tier: true,
+    note: 'Cohere compatibility layer for OpenAI'
   }
 };
+
+// Provider health (success-rate) tracking for the fallback chain
+const providerHealth = {};
+function noteProviderHealth(name, ok, ms) {
+  providerHealth[name] = providerHealth[name] || { ok: 0, fail: 0, last_ms: 0 };
+  if (ok) { providerHealth[name].ok++; providerHealth[name].last_ms = ms; }
+  else providerHealth[name].fail++;
+}
+function getHealthyProviders(preferCloud = true) {
+  const all = ['openrouter', 'nvidia', 'groq', 'cohere', 'lmstudio', 'ollama'];
+  // prefer cloud first, then local
+  return all.filter(n => {
+    const p = PROVIDERS[n];
+    if (!p || !p.api_key && n !== 'ollama' && n !== 'lmstudio') return false;
+    if (preferCloud ? (p.tier !== 'cloud-free') : (p.tier !== 'local-free')) {
+      // also include local as fallback
+      if (preferCloud && p.tier === 'local-free') return true;
+      if (!preferCloud && p.tier === 'cloud-free') return false;
+    }
+    return p.api_key || n === 'ollama' || n === 'lmstudio';
+  }).sort((a, b) => {
+    // Sort: healthy providers first, then by tier
+    const ha = providerHealth[a] || { fail: 0 };
+    const hb = providerHealth[b] || { fail: 0 };
+    if (ha.fail !== hb.fail) return ha.fail - hb.fail;
+    return 0;
+  });
+}
 
 // Logical → real provider/model map. Incluye todos los IDs que el YAML/resolver
 // puede devolver, mapeados SOLO a modelos que existen hoy en el cluster.
@@ -392,39 +457,64 @@ const LOGICAL_TO_REAL = {
   'gemini-2.0-flash-exp':          { provider: 'openrouter', model: 'google/gemma-4-26b-a4b-it:free' }
 };
 
-// Real inference — una funci\u00f3n por provider, devuelve {text, usage, latency_ms}
+// Real inference — OpenAI standard con tools + history
+// opts: { messages?: [{role,content}], tools?: [{type,function}], max_tokens?, temperature?, system_prompt? }
 async function callProvider(providerName, model, prompt, opts = {}) {
   const prov = PROVIDERS[providerName];
   if (!prov) throw new Error(`Unknown provider: ${providerName}`);
-  const maxTokens = opts.max_tokens || 200;
-  const temperature = opts.temperature ?? 0.1;
+  const maxTokens = opts.max_tokens || 1024;
+  const temperature = opts.temperature ?? 0.2;
+
+  // Build messages array (OpenAI standard): combine system_prompt + messages[] + prompt fallback
+  const messages = Array.isArray(opts.messages) ? [...opts.messages] : [];
+  if (opts.system_prompt && !messages.some(m => m.role === 'system')) {
+    messages.unshift({ role: 'system', content: opts.system_prompt });
+  }
+  if (prompt && (messages.length === 0 || messages[messages.length - 1].role !== 'user')) {
+    messages.push({ role: 'user', content: prompt });
+  }
+
   const start = Date.now();
 
   if (prov.type === 'ollama') {
+    const body = {
+      model, messages: messages.map(m => ({ role: m.role, content: m.content })),
+      stream: false,
+      options: { temperature, num_predict: maxTokens }
+    };
+    if (opts.tools && opts.tools.length > 0) {
+      // Ollama format: tools → top-level array
+      body.tools = opts.tools.map(t => t.function || t);
+    }
     const res = await fetch(`${prov.base_url}/api/chat`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], stream: false,
-        options: { temperature, num_predict: maxTokens } }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       signal: AbortSignal.timeout(90000)
     });
     if (!res.ok) throw new Error(`Ollama HTTP ${res.status}: ${await res.text()}`);
     const data = await res.json();
-    return { text: data.message?.content || '', usage: data, latency_ms: Date.now() - start };
+    return {
+      text: data.message?.content || '',
+      usage: data,
+      latency_ms: Date.now() - start,
+      tool_calls: data.message?.tool_calls || null,
+      finish_reason: data.done ? 'stop' : 'tool_calls',
+      raw: data
+    };
   }
   if (prov.type === 'openai') {
-    const url = providerName === 'openrouter'
-      ? `${prov.base_url}/chat/completions`
-      : `${prov.base_url.replace(/\/$/, '')}/chat/completions`;
+    const url = `${prov.base_url.replace(/\/$/, '')}/chat/completions`;
     const headers = { 'Content-Type': 'application/json' };
     if (prov.api_key) headers['Authorization'] = `Bearer ${prov.api_key}`;
     if (providerName === 'openrouter') {
       headers['HTTP-Referer'] = 'http://localhost:9500';
       headers['X-Title'] = 'SynK-IA OmniRoute';
     }
+    const body = { model, messages, max_tokens: maxTokens, temperature, stream: false };
+    if (opts.tools && opts.tools.length > 0 && prov.tools_supported !== false) {
+      body.tools = opts.tools; body.tool_choice = 'auto';
+    }
     const res = await fetch(url, {
-      method: 'POST', headers, signal: AbortSignal.timeout(90000),
-      body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }],
-        max_tokens: maxTokens, temperature, stream: false })
+      method: 'POST', headers, signal: AbortSignal.timeout(90000), body: JSON.stringify(body)
     });
     if (!res.ok) throw new Error(`${providerName} HTTP ${res.status}: ${await res.text().then(t => t.slice(0,200))}`);
     const data = await res.json();
@@ -432,14 +522,14 @@ async function callProvider(providerName, model, prompt, opts = {}) {
     return {
       text: ch.message?.content || '',
       usage: data.usage || {},
-      latency_ms: Date.now() - start
+      latency_ms: Date.now() - start,
+      tool_calls: ch.message?.tool_calls || null,
+      finish_reason: ch.finish_reason || 'stop',
+      raw: data
     };
   }
   throw new Error(`Provider type ${prov.type} not implemented`);
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// OPENROUTER FREE DISCOVERY — auto-update del cat\u00e1logo
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function refreshOpenRouterFree(force = false) {
@@ -729,6 +819,88 @@ async function startOrchestratorAPI() {
           count: models.length,
           models
         }, null, 2));
+      });
+      return;
+    }
+
+    // POST /v1/chat/completions — OpenAI standard endpoint with tools + history
+    if (req.url.startsWith('/v1/chat/completions') && req.method === 'POST') {
+      let body = '';
+      req.on('data', c => body += c);
+      req.on('end', async () => {
+        try {
+          const payload = JSON.parse(body || '{}');
+          const messages = Array.isArray(payload.messages) ? payload.messages : [];
+          if (messages.length === 0) throw new Error('messages[] is required');
+
+          const opts = {
+            messages,
+            max_tokens: payload.max_tokens || 1024,
+            temperature: payload.temperature ?? 0.2,
+            tools: payload.tools
+          };
+
+          let r, chosen, triedProviders = [];
+          if (payload.model && LOGICAL_TO_REAL[payload.model]) {
+            // Logical id \u2192 specific provider+model
+            chosen = LOGICAL_TO_REAL[payload.model];
+            r = await callProvider(chosen.provider, chosen.model, '', opts);
+            noteProviderHealth(chosen.provider, true, r.latency_ms);
+          } else {
+            // Auto-fallback: cloud-free chain \u2192 local
+            // Order: openrouter \u2192 nvidia \u2192 groq \u2192 cohere \u2192 lmstudio \u2192 ollama
+            const chain = [];
+            for (const n of ['openrouter', 'nvidia', 'groq', 'cohere']) {
+              const p = PROVIDERS[n];
+              if (p && p.api_key) chain.push(n);
+            }
+            // Always include lmstudio and ollama as fallback
+            chain.push('lmstudio');
+            chain.push('ollama');
+            // Pick model for the chosen provider; use provider default
+            for (const name of chain) {
+              const p = PROVIDERS[name];
+              if (!p) continue;
+              triedProviders.push(name);
+              try {
+                r = await callProvider(name, payload.model && PROVIDERS[payload.model] ? payload.model : p.default_model, '', opts);
+                chosen = { provider: name, model: p.default_model };
+                noteProviderHealth(name, true, r.latency_ms);
+                if (!payload.model) chosen.model = r.raw?.model || p.default_model;
+                else chosen.model = payload.model;
+                break;
+              } catch (err) {
+                noteProviderHealth(name, false, 0);
+                logEvent('warn', `chain fallback: ${name} failed (${err.message.slice(0,120)})`);
+                continue;
+              }
+            }
+            if (!r) throw new Error(`All providers exhausted: tried ${triedProviders.join(', ')}`);
+          }
+
+          const openaiResp = {
+            id: 'chatcmpl-' + Date.now(),
+            object: 'chat.completion',
+            created: Math.floor(Date.now() / 1000),
+            model: chosen?.model || payload.model || 'auto',
+            choices: [{
+              index: 0,
+              message: {
+                role: 'assistant',
+                content: r.text || '',
+                tool_calls: r.tool_calls || undefined
+              },
+              finish_reason: r.finish_reason || 'stop'
+            }],
+            usage: r.usage || {},
+            _omni: { provider: chosen?.provider, tried: triedProviders }
+          };
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(openaiResp, null, 2));
+        } catch (err) {
+          logEvent('error', `v1/chat/completions error: ${err.message}`);
+          res.writeHead(500); res.end(JSON.stringify({ error: err.message, _tried: triedProviders }));
+        }
       });
       return;
     }

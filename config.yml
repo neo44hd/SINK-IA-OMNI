@@ -1,0 +1,67 @@
+tunnel: aa3e380e-4a72-4cda-b3bc-055cce0d555f
+credentials-file: /Users/davidnows/.cloudflared/aa3e380e-4a72-4cda-b3bc-055cce0d555f.json
+# [2026-09-14] Force HTTP/2 transport: QUIC+UDP+9.9.9.9 DNS path was filtered on
+# this Mac (198.41.200.33 UDP `no route to host`, 9.9.9.9:53 unreachable).
+# HTTP/2 over TCP is unblocked and resolves the `tlsv1 alert internal error`
+# that all 8 ingress hostnames were returning.
+protocol: http2
+no-autoupdate: true
+
+# ============================================================================
+# Cloudflare Tunnel — sinkialabs.com (verified live 2026-09-10 19:00Z)
+# ============================================================================
+# Tunnel ID:  aa3e380e-4a72-4cda-b3bc-055cce0d555f
+# DNS CNAMEs: see Cloudflare dashboard → sinkialabs.com zone 7ee06baabd732b2227b578842e9cbf4b
+# PM2 proc:   cloudflared-tunnel (id 5)
+#
+# Backend ports verified 2026-09-10:
+#   9002 = sinkialabs main ERP              (PM2 proc, node :9002)
+#   3020 = synkia-hub / AI Provider Hub      (PM2 proc, node :3020)
+#   7080 = odysseus-ui                       (OrbStack Docker)
+#   8787 = hermes-webui                      (Docker compose, ghcr.io/nesquena/hermes-webui:latest)
+#   9302 = mission-control-v2 server.js      (PM2 proc, APP_PORT=9302)
+#   18790 = openclaw-gateway                 (launchd ai.openclaw.gateway.plist, Node 26.4.0)
+#   8090 = hermes-bus                        (PM2 proc, python .local/bin/hermes serve)
+#   8082 = Free Claude Code admin            (python3.1 uvicorn, /admin restricts to localhost)
+#
+# History:
+#   2026-09-08 21:46 — pre-OS update: ingress wired to old ports
+#   2026-09-10 ~15:30 — post-OS update corrections (3120→3020, 5173→9302, 18791→18790)
+#   2026-09-10 ~15:50 — added freecode CNAME + ingress
+#   2026-09-10 ~16:00 — fixed dockerfile -> official image, started synkia-hub,
+#                       mission-control, hermes-bus, openclaw gateway (token rotated)
+#   2026-09-10 19:00 — verified end-to-end: all 11 hostnames 200/302 via tunnel
+ingress:
+  # [2026-09-20 22:31Z] Reescritura completa del ingress — apuntar todos los hostnames
+  # al OmniRoute (UN solo hub canónico) o servicios vivos reales.
+  # La política es: cockpit/hub-ai/hub/app/sink/www/api/docs → OmniRoute :9500
+  # o :3120 (frontend synk-ia-backend) o :9501 (resolver).
+  # odysseus conserva :7080 (sigue vivo). fc_proxy mantiene :18082.
+  # [F1 Cockpit del Unified Hub] synkia-hub AI Provider Hub → OmniRoute
+  - hostname: cockpit.sinkialabs.com
+    service: http://localhost:9500
+  - hostname: hub-ai.sinkialabs.com
+    service: http://localhost:9501
+  # Original site: odysseus-ui (OrbStack Docker) — sigue vivo en :7080
+  - hostname: odysseus.sinkialabs.com
+    service: http://localhost:7080
+  # hub.sinkialabs.com → OmniRoute orchestrator
+  - hostname: hub.sinkialabs.com
+    service: http://localhost:9500
+  # Mission Control v2 / app frontend → synk-ia-backend web :3120
+  - hostname: app.sinkialabs.com
+    service: http://localhost:3120
+  # Free Claude Code (admin dashboard) — fc_proxy.py intacto
+  - hostname: freecode.sinkialabs.com
+    service: http://localhost:18082
+  # docs.sinkialabs.com → OmniRoute (en lugar de docuclass muerto)
+  - hostname: docs.sinkialabs.com
+    service: http://localhost:9500
+  # API + main ERP — OmniRoute ya consolidated
+  - hostname: api.sinkialabs.com
+    service: http://localhost:9500
+  - hostname: sinkialabs.com
+    service: http://localhost:9500
+  - hostname: www.sinkialabs.com
+    service: http://localhost:9500
+  - service: http_status:404
