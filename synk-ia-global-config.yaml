@@ -1,0 +1,709 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# SynK-IA GLOBAL UNIFIED CONFIGURATION
+# ═══════════════════════════════════════════════════════════════════════════════
+# This is the SINGLE SOURCE OF TRUTH for the entire SynK-IA ecosystem.
+# All services, agents, and tools should reference this configuration.
+# Last updated: 2026-08-03T20:00:00Z
+# ═══════════════════════════════════════════════════════════════════════════════
+
+version: "1.0"
+environment: "production"
+
+# ───────────────────────────────────────────────────────────────────────────────
+# SERVICE REGISTRY — All services and their endpoints
+# ───────────────────────────────────────────────────────────────────────────────
+services:
+  # Core Hub & Access Layer
+  hub-ai-local:
+    name: "Hub AI Local"
+    type: "dashboard"
+    port: 8889
+    protocol: "http"
+    host: "localhost"
+    baseUrl: "http://localhost:8889"
+    critical: true
+    autoRestart: true
+    healthCheck: "/health"
+    description: "Central dashboard and service launcher"
+    role: "orchestration-entry-point"
+
+  # API & Model Gateway Layer
+  sinkia-ops:
+    name: "SynK-IA-Ops"
+    type: "api-gateway"
+    port: 3001
+    protocol: "http"
+    host: "localhost"
+    baseUrl: "http://localhost:3001"
+    docker:
+      service: "sinkia-api"
+      network: "synkia-os-net"
+    critical: true
+    autoRestart: true
+    healthCheck: "/health"
+    models: 338
+    description: "Main API gateway with 338 IA models configured"
+    role: "api-orchestration"
+
+  # Agent Orchestration & MCP Gateway
+  openclaw:
+    name: "OpenClaw"
+    type: "mcp-gateway"
+    port: 7999
+    protocol: "http"
+    host: "localhost"
+    baseUrl: "http://localhost:7999"
+    docker:
+      service: "openclaw"
+      network: "synkia-os-net"
+    critical: true
+    autoRestart: true
+    healthCheck: "/health"
+    description: "MCP gateway for autonomous agents (Claude Code, Codex, Hermes)"
+    role: "agent-orchestration"
+    capabilities:
+      - "tool-calling"
+      - "mcp-protocol"
+      - "agent-coordination"
+
+  # Local LLM Provider
+  ollama:
+    name: "Ollama"
+    type: "local-llm"
+    port: 11434
+    protocol: "http"
+    host: "127.0.0.1"
+    baseUrl: "http://127.0.0.1:11434"
+    critical: true
+    autoRestart: false
+    healthCheck: "/api/version"
+    models: 7
+    description: "Local LLM provider with 7 models (llama3.2-3b, qwen2.5-coder:7b, etc.)"
+    role: "local-inference"
+    environment: "host"
+
+  # LLM Gateway & Proxy
+  litellm:
+    name: "LiteLLM Gateway"
+    type: "llm-proxy"
+    port: 4000
+    protocol: "http"
+    host: "localhost"
+    baseUrl: "http://localhost:4000/v1"
+    critical: true
+    autoRestart: true
+    description: "OpenAI-compatible gateway proxying to Ollama, cloud providers, etc."
+    role: "model-proxy"
+    providers:
+      - "ollama"
+      - "litellm-cloud"
+      - "custom-endpoints"
+
+  # Chat Interface
+  openwebui:
+    name: "OpenWebUI"
+    type: "chat-ui"
+    port: 3030
+    protocol: "http"
+    host: "localhost"
+    baseUrl: "http://localhost:3030"
+    docker:
+      service: "sinkia-openwebui"
+      network: "synkia-os-net"
+    critical: false
+    autoRestart: true
+    healthCheck: "/health"
+    description: "Chat interface for model interactions"
+    role: "user-interface"
+
+  # Automation & Workflows
+  n8n:
+    name: "n8n"
+    type: "automation"
+    port: 5678
+    protocol: "http"
+    host: "localhost"
+    baseUrl: "http://localhost:5678"
+    docker:
+      service: "sinkia-n8n"
+      network: "synkia-os-net"
+    critical: false
+    autoRestart: true
+    healthCheck: "/healthz"
+    description: "Automation workflows and integrations"
+    role: "task-automation"
+
+  # Vector Database
+  qdrant:
+    name: "Qdrant"
+    type: "vector-db"
+    port: 6333
+    protocol: "http"
+    host: "localhost"
+    baseUrl: "http://localhost:6333"
+    docker:
+      service: "qdrant"
+      network: "synkia-os-net"
+    critical: true
+    autoRestart: true
+    healthCheck: "/health"
+    description: "Vector database for embeddings and semantic search"
+    role: "memory-storage"
+
+  # Meta Search Engine
+  searxng:
+    name: "SearXNG"
+    type: "meta-search"
+    port: 8888
+    protocol: "http"
+    host: "localhost"
+    baseUrl: "http://localhost:8888"
+    docker:
+      service: "sinkia-searxng"
+      network: "synkia-os-net"
+    critical: false
+    autoRestart: true
+    healthCheck: "/"
+    description: "Meta search engine for web/GitHub discovery"
+    role: "research-tools"
+
+  # RuFlow Job Matching
+  ruflow-backend:
+    name: "RuFlow Backend"
+    type: "job-matching-api"
+    port: 8000
+    protocol: "http"
+    host: "localhost"
+    baseUrl: "http://localhost:8000/api/v1"
+    docker:
+      service: "ruflow_backend"
+      network: "ruflow_default"
+    critical: false
+    autoRestart: true
+    healthCheck: "/api/v1/health"
+    description: "Job-resume matching and scoring engine"
+    role: "specialized-ai"
+    capabilities:
+      - "resume-parsing"
+      - "job-matching"
+      - "semantic-scoring"
+
+  ruflow-frontend:
+    name: "RuFlow Frontend"
+    type: "job-ui"
+    port: 3000
+    protocol: "http"
+    host: "localhost"
+    baseUrl: "http://localhost:3000"
+    docker:
+      service: "ruflow_frontend"
+      network: "ruflow_default"
+    critical: false
+    autoRestart: true
+    healthCheck: "/"
+    description: "RuFlow UI for job matching workflows"
+    role: "user-interface"
+
+  # Hermes Desktop Agent
+  hermes:
+    name: "Hermes WebUI"
+    type: "desktop-agent"
+    port: 8787
+    protocol: "http"
+    host: "127.0.0.1"
+    baseUrl: "http://127.0.0.1:8787"
+    docker:
+      service: "hermes-webui"
+      network: "bridge"
+    critical: false
+    autoRestart: true
+    healthCheck: "/"
+    description: "Local AI desktop agent with stateful execution"
+    role: "autonomous-agent"
+    capabilities:
+      - "task-execution"
+      - "workspace-awareness"
+      - "session-management"
+
+  # Admin Panel
+  mission-control:
+    name: "Mission Control"
+    type: "admin-panel"
+    port: 9302
+    protocol: "http"
+    host: "localhost"
+    baseUrl: "http://localhost:9302"
+    critical: false
+    autoRestart: false
+    healthCheck: "/"
+    description: "Admin panel for system monitoring and control"
+    role: "system-management"
+
+  # Heaven Hub — Knowledge Base & Content Management
+  heaven-hub:
+    name: "Heaven Hub"
+    type: "knowledge-hub"
+    port: 8765
+    protocol: "http"
+    host: "localhost"
+    baseUrl: "http://localhost:8765"
+    docker:
+      service: "sinkia-heaven-hub"
+      network: "synkia-os-net"
+      image: "heaven-hub-fixed:latest"
+    critical: false
+    autoRestart: true
+    healthCheck: "/health"
+    description: "Heaven Hub for knowledge base management and content aggregation"
+    role: "knowledge-management"
+    capabilities:
+      - "content-management"
+      - "knowledge-base"
+      - "search-integration"
+      - "api-aggregation"
+
+  # Heaven Search Platform — Advanced Search Engine
+  heaven-search:
+    name: "Heaven Search Platform"
+    type: "search-engine"
+    port: 8766
+    protocol: "http"
+    host: "localhost"
+    baseUrl: "http://localhost:8766"
+    docker:
+      service: "sinkia-heaven-search"
+      network: "synkia-os-net"
+      image: "heaven-search-platform:latest"
+    critical: false
+    autoRestart: true
+    healthCheck: "/health"
+    description: "Advanced search platform for cross-ecosystem searching"
+    role: "search-and-discovery"
+    capabilities:
+      - "full-text-search"
+      - "vector-search"
+      - "semantic-search"
+      - "multi-source-indexing"
+
+  # Heaven Ecosystem Agent — Autonomous Agent
+  heaven-agent:
+    name: "Heaven Ecosystem Agent"
+    type: "autonomous-agent"
+    port: 8767
+    protocol: "http"
+    host: "localhost"
+    baseUrl: "http://localhost:8767"
+    docker:
+      service: "sinkia-heaven-agent"
+      network: "synkia-os-net"
+      image: "heaven-ecosystem-agent:latest"
+    critical: false
+    autoRestart: true
+    healthCheck: "/health"
+    description: "Heaven autonomous agent for ecosystem tasks and automation"
+    role: "ecosystem-agent"
+    capabilities:
+      - "task-automation"
+      - "knowledge-synthesis"
+      - "cross-service-orchestration"
+      - "intelligent-routing"
+
+  # Odysseus Master Orchestrator
+  odysseus:
+    name: "Odysseus"
+    type: "master-orchestrator"
+    port: 9999
+    protocol: "http"
+    host: "localhost"
+    baseUrl: "http://localhost:9999"
+    docker:
+      service: "odysseus"
+      network: "synkia-os-net"
+      image: "odysseus-odysseus:latest"
+    critical: true
+    autoRestart: true
+    healthCheck: "/health"
+    description: "Master orchestrator for coordinating all SynK-IA and Heaven services (Odysseus journey visualization)"
+    role: "master-orchestration"
+    capabilities:
+      - "service-coordination"
+      - "workflow-management"
+      - "dependency-resolution"
+      - "journey-visualization"
+      - "resource-allocation"
+    integratedServices:
+      - "sinkia-ops"
+      - "openclaw"
+      - "hub-ai-local"
+      - "ollama"
+      - "litellm"
+      - "openwebui"
+      - "n8n"
+      - "qdrant"
+      - "searxng"
+      - "ruflow-backend"
+      - "ruflow-frontend"
+      - "hermes"
+      - "mission-control"
+      - "heaven-hub"
+      - "heaven-search"
+      - "heaven-agent"
+
+# ───────────────────────────────────────────────────────────────────────────────
+# MODEL SELECTION POLICY — Intelligent routing by task type
+# ───────────────────────────────────────────────────────────────────────────────
+modelSelection:
+  strategy: "intelligent-context-aware"
+  defaultFallbackChain:
+    - "litellm-gateway"  # Primary: cloud models via gateway
+    - "ollama-qwen-coder"  # Secondary: local coder
+    - "ollama-llama-3b"  # Tertiary: lightweight local
+  
+  # Task-specific model selections
+  taskProfiles:
+    # Coding & refactoring
+    coding:
+      primary: "local-claude-code"  # via OpenClaw → LiteLLM → Claude
+      secondary: "local-coder-ollama"  # qwen2.5-coder:7b
+      fallback: "ollama-qwen:7b"
+      costOptimized: false
+      contextWindow: 32768
+      reasoning: true
+    
+    # Writing & creative
+    creative:
+      primary: "local-big"  # Big model via LiteLLM
+      secondary: "ollama-llama:3b"
+      fallback: "local-fast"
+      costOptimized: true
+      contextWindow: 8192
+      reasoning: false
+    
+    # Job matching (RuFlow)
+    jobMatching:
+      primary: "ruflow-semantic-scorer"
+      secondary: "local-reason"  # reasoning model
+      fallback: "ollama-llama:3b"
+      costOptimized: false
+      contextWindow: 16384
+      reasoning: true
+    
+    # Research & analysis
+    research:
+      primary: "local-reason"  # reasoning model
+      secondary: "local-big"
+      fallback: "ollama-llama:3b"
+      costOptimized: true
+      contextWindow: 32768
+      reasoning: true
+    
+    # Fast/lightweight
+    fast:
+      primary: "ollama-llama:3b"
+      secondary: "local-fast"
+      fallback: "ollama-qwen:3b"
+      costOptimized: true
+      contextWindow: 8192
+      reasoning: false
+
+# ───────────────────────────────────────────────────────────────────────────────
+# ROUTING & ORCHESTRATION RULES
+# ───────────────────────────────────────────────────────────────────────────────
+orchestration:
+  # Request routing rules
+  routing:
+    # Route requests based on context keywords
+    patterns:
+      # Code-related requests
+      - context: ["code", "refactor", "debug", "test", "function", "class"]
+        targetTool: "openclaw"
+        model: "local-claude-code"
+        priority: "high"
+      
+      # Job matching
+      - context: ["job", "resume", "match", "candidate", "hiring", "ruflow"]
+        targetTool: "ruflow-backend"
+        model: "ruflow-semantic-scorer"
+        priority: "high"
+      
+      # Automation/workflow
+      - context: ["automate", "workflow", "schedule", "trigger", "n8n"]
+        targetTool: "n8n"
+        model: "local-fast"
+        priority: "medium"
+      
+      # Research/analysis
+      - context: ["research", "analyze", "investigate", "deep-dive", "search"]
+        targetTool: "sinkia-ops"
+        model: "local-reason"
+        priority: "high"
+      
+      # Creative writing
+      - context: ["write", "creative", "story", "essay", "article"]
+        targetTool: "openwebui"
+        model: "local-big"
+        priority: "medium"
+      
+      # Default fallback
+      - context: []
+        targetTool: "hub-ai-local"
+        model: "local-fast"
+        priority: "medium"
+
+  # Health monitoring
+  healthCheck:
+    interval: 30  # seconds
+    timeout: 5  # seconds
+    retries: 3
+    autoRestartThreshold: 2  # failures before auto-restart
+    criticalServices:
+      - "sinkia-ops"
+      - "openclaw"
+      - "ollama"
+      - "qdrant"
+
+  # Load balancing
+  loadBalancing:
+    enabled: true
+    strategy: "least-loaded"
+    maxConcurrentPerService: 10
+    timeoutMs: 30000
+
+  # Auto-scaling & recovery
+  autoHealing:
+    enabled: true
+    restartPolicy:
+      maxRetries: 5
+      backoffMultiplier: 2
+      initialDelayMs: 1000
+      maxDelayMs: 30000
+
+# ───────────────────────────────────────────────────────────────────────────────
+# MEMORY & LEARNING CONFIGURATION
+# ───────────────────────────────────────────────────────────────────────────────
+memory:
+  unifiedMemoryPath: "~/.synkia-ai-hub/unified-memory.json"
+  discoveryCache: "~/.synkia-ai-hub/discovery-cache.json"
+  ecosystemState: "~/.synkia-ai-hub/ecosystem-state.json"
+  eventLog: "~/.synkia-ai-hub/ecosystem-events.log"
+  
+  # Learning & optimization
+  learning:
+    enabled: true
+    trackPerformance: true
+    updateModelSelectionPolicy: true
+    updateRoutingRules: true
+    minSamplesBeforeUpdate: 50
+    
+  # GitHub discovery integration
+  githubDiscovery:
+    enabled: true
+    updateInterval: 3600  # seconds (1 hour)
+    cachePath: "~/.synkia-ai-hub/discovery-cache.json"
+    keywords:
+      - "ai-gateway"
+      - "llm-gateway"
+      - "mcp"
+      - "agent"
+      - "agentic-ai"
+    maxTrendingProjects: 25
+
+# ───────────────────────────────────────────────────────────────────────────────
+# NETWORK CONFIGURATION
+# ───────────────────────────────────────────────────────────────────────────────
+networking:
+  # Docker networks
+  dockerNetworks:
+    synkia-os-net:
+      driver: "bridge"
+      ipam:
+        config:
+          - subnet: "172.31.0.0/16"
+      services:
+        - "sinkia-api"
+        - "sinkia-openwebui"
+        - "sinkia-n8n"
+        - "sinkia-qdrant"
+        - "sinkia-searxng"
+        - "openclaw-synkia"
+  
+  # Tunnel configuration (Cloudflare)
+  tunnel:
+    enabled: true
+    configPath: "~/.cloudflared/config.yml"
+    domain: "sinkialabs.com"
+    routes:
+      - subdomain: "api"
+        target: "localhost:3001"
+        port: 3001
+      - subdomain: "chat"
+        target: "localhost:3030"
+        port: 3030
+      - subdomain: "n8n"
+        target: "localhost:5678"
+        port: 5678
+      - subdomain: "claw"
+        target: "localhost:7999"
+        port: 7999
+      - subdomain: "hub"
+        target: "localhost:8889"
+        port: 8889
+
+# ───────────────────────────────────────────────────────────────────────────────
+# PROCESS MANAGEMENT (PM2)
+# ───────────────────────────────────────────────────────────────────────────────
+pm2:
+  enabled: true
+  processes:
+    - name: "ollama"
+      script: "ollama serve"
+      autoRestart: true
+      maxMemory: "4G"
+    
+    - name: "cloudflared-tunnel"
+      script: "cloudflared tunnel run synkialabs"
+      autoRestart: true
+      maxMemory: "200M"
+    
+    - name: "synk-ia-orchestrator"
+      script: "/Users/davidnows/synk-ia-orchestrator.js"
+      autoRestart: true
+      maxMemory: "500M"
+      env:
+        NODE_ENV: "production"
+        CONFIG_PATH: "/Users/davidnows/synk-ia-global-config.yaml"
+
+# ───────────────────────────────────────────────────────────────────────────────
+# CAPABILITIES REGISTRY — What each tool can do
+# ───────────────────────────────────────────────────────────────────────────────
+capabilities:
+  # OpenClaw
+  openclaw:
+    - tool-calling
+    - mcp-protocol
+    - agent-coordination
+    - code-execution
+    - reasoning
+    - multi-agent
+  
+  # RuFlow
+  ruflow:
+    - resume-parsing
+    - job-matching
+    - semantic-scoring
+    - embedding-search
+    - batch-processing
+  
+  # n8n
+  n8n:
+    - workflow-automation
+    - task-scheduling
+    - webhooks
+    - integrations
+    - conditional-logic
+  
+  # SearXNG
+  searxng:
+    - web-search
+    - github-search
+    - meta-search
+    - aggregation
+    - discovery
+  
+  # Qdrant
+  qdrant:
+    - vector-storage
+    - similarity-search
+    - reranking
+    - filtering
+    - batch-operations
+  
+  # Ollama
+  ollama:
+    - local-inference
+    - model-loading
+    - context-window
+    - quantization
+    - pull-models
+
+# ───────────────────────────────────────────────────────────────────────────────
+# MONITORING & LOGGING
+# ───────────────────────────────────────────────────────────────────────────────
+monitoring:
+  enabled: true
+  logLevel: "info"
+  collectMetrics: true
+  metricsUpdateInterval: 60  # seconds
+  persistMetrics: true
+  alerting:
+    enabled: true
+    channels:
+      - "console"
+      - "file"
+    rules:
+      - metric: "service_down"
+        severity: "critical"
+      - metric: "high_latency"
+        threshold: 5000  # ms
+        severity: "warning"
+      - metric: "memory_usage"
+        threshold: 80  # percent
+        severity: "warning"
+
+# ───────────────────────────────────────────────────────────────────────────────
+# INTEGRATION POINTS — How tools work together
+# ───────────────────────────────────────────────────────────────────────────────
+integrations:
+  # OpenClaw ↔ Hermes
+  openclaw_hermes:
+    enabled: true
+    protocol: "mcp"
+    queueTopic: "agent_tasks"
+    completionCallback: "orchestrator/task-completed"
+  
+  # LiteLLM ↔ Ollama
+  litellm_ollama:
+    enabled: true
+    proxyPattern: "http://127.0.0.1:4000/v1"
+    fallbackDelay: 1000  # ms
+  
+  # RuFlow ↔ Qdrant
+  ruflow_qdrant:
+    enabled: true
+    collection: "resumes"
+    embeddingModel: "sentence-transformers/all-MiniLM-L6-v2"
+  
+  # n8n ↔ Orchestrator
+  n8n_orchestrator:
+    enabled: true
+    webhookBase: "http://localhost:5678/webhook"
+    taskQueue: "orchestrator/workflow_tasks"
+  
+  # Hub AI Local ↔ All Services
+  hub_integration:
+    enabled: true
+    discoveryEndpoint: "http://localhost:8889/api/services"
+    statusEndpoint: "http://localhost:8889/api/orchestrator/status"
+
+# ───────────────────────────────────────────────────────────────────────────────
+# DEPLOYMENT & ENVIRONMENT
+# ───────────────────────────────────────────────────────────────────────────────
+deployment:
+  environment: "local-production"
+  timezone: "America/Los_Angeles"
+  locale: "es-ES"
+  dataPath: "/Users/davidnows/.synkia-ai-hub"
+  logsPath: "/Users/davidnows/.synkia-ai-hub/logs"
+  configPath: "/Users/davidnows/synk-ia-global-config.yaml"
+  
+  # Feature flags
+  features:
+    autoHealing: true
+    githubDiscovery: true
+    performanceTracking: true
+    autoModelUpdates: true
+    unifiedMemory: true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# END OF CONFIGURATION
+# ═══════════════════════════════════════════════════════════════════════════════

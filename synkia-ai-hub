@@ -1,0 +1,84 @@
+#!/bin/bash
+# synkia-ai-hub — Configura el entorno para apuntar al AI Provider Hub
+# Uso:  source ~/.config/synkia-ai-hub.sh
+#       eval $(~/.config/synkia-ai-hub.sh --export)
+#       synkia-ai-hub status   (test E2E)
+#
+# Stack actualizado 2026-09-18: OmniRoute = synk-orchestrator:9500 + synk-model-selector:9501
+# Política: cloud-free primero, local después. Solo free+local se usan por defecto.
+
+# ── OmniRoute (Orchestrator = hub principal) ──
+export ORCHESTRATOR_URL="http://127.0.0.1:9500"
+export OMNIROUTE_URL="http://127.0.0.1:9501"
+# AI_HUB_URL apunta al orquestrador (legacy alias de sinkia-env sigue funcionando)
+export AI_HUB_URL="$ORCHESTRATOR_URL/api/orchestrator"
+export AI_HUB_API_KEY="ai-hub-local"
+export AI_HUB_DEFAULT_MODEL="prism-ml/bonsai-27b"
+
+# ── Backends LOCALES (Mac Mini, free) ──
+# Ollama: contenedor synk-ia-ollama en host:11435 (no choca con backend:11434)
+export OLLAMA_URL="http://127.0.0.1:11435"
+export OLLAMA_HOST="http://127.0.0.1:11435"
+export OLLAMA_API_KEY="ollama"
+export OLLAMA_MODEL="llama3.2:3b"
+export OLLAMA_CTX="32768"
+
+# LM Studio: app nativa del Mac, puerto 1234
+export LMSTUDIO_URL="http://127.0.0.1:1234/v1"
+export LMSTUDIO_API_KEY="lm-studio"
+# 7 modelos reales detectados 2026-09-18
+export LMSTUDIO_DEFAULT_MODEL="prism-ml/bonsai-27b"
+export LMSTUDIO_CODE_MODEL="deepseek-v4-flash"
+export LMSTUDIO_VISION_MODEL="qwen/qwen3-vl-4b"
+export LMSTUDIO_REASONING_MODEL="zai-org/glm-4.6v-flash"
+export LMSTUDIO_EMBEDDING_MODEL="text-embedding-nomic-embed-text-v1.5"
+
+# ── Cloud FREE (OpenRouter, filtro :free) ──
+export OPENROUTER_URL="https://openrouter.ai/api/v1"
+export OPENROUTER_DEFAULT_MODEL="inclusionai/ling-3.0-flash:free"
+
+# ── Orden de prioridad (cloud-free primero) ──
+# Prioridad Cloud-Free PRIMERO, local como fallback
+export MODEL_ROUTING_PRIORITY="openrouter,lmstudio,ollama"
+export CLOUD_FREE_FIRST=true
+# Para paid (Gemini/NVIDIA/OpenAI): ENABLE_PAID_PROVIDERS=true y meter key
+export ENABLE_PAID_PROVIDERS="false"
+
+# ── Compatibilidad con configs antiguas (sinkia-ia .env) ──
+# LMSTUDIO_BASE_URL legacy sigue apuntando a LM Studio (no LiteLLM que está muerto)
+export LMSTUDIO_BASE_URL="$LMSTUDIO_URL"
+export LMSTUDIO_PROXY_PORT="1234"
+
+# Cargar keys reales del .env centralizado
+ENV_FILE="$HOME/.hermes/.env"
+if [ -f "$ENV_FILE" ]; then
+  set -a
+  . "$ENV_FILE"
+  set +a
+fi
+
+# CLI mode: --export imprime las vars del hub
+if [ "$1" == "--export" ]; then
+  env | grep -E "^(AI_HUB|OLLAMA|LMSTUDIO|OPENROUTER|ORCHESTRATOR|OMNIROUTE|ENABLE_PAID|MODEL_ROUTING)_" | sort
+  exit 0
+fi
+
+if [ "$1" == "status" ]; then
+  echo "═══ SynK-IA AI Hub Status (actualizado 2026-09-18) ═══"
+  printf "  OmniRoute (orch):   "; curl -s --max-time 3 http://127.0.0.1:9500/health 2>/dev/null | /usr/bin/python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','—'))" 2>/dev/null || echo "—"
+  echo ""
+  printf "  Model-Selector:     "; curl -s --max-time 3 http://127.0.0.1:9501/health 2>/dev/null | /usr/bin/python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','—'))" 2>/dev/null || echo "—"
+  echo ""
+  printf "  LM Studio (1234):   "; curl -s --max-time 3 -o /dev/null -w "%{http_code}" $LMSTUDIO_URL/models 2>/dev/null || echo "—"
+  echo ""
+  printf "  Ollama (11435):     "; curl -s --max-time 3 -o /dev/null -w "%{http_code}" $OLLAMA_URL/api/tags 2>/dev/null || echo "—"
+  echo ""
+  echo "───────────────────────────────────────────"
+  echo "  LM Studio modelos:  $(curl -s --max-time 3 $LMSTUDIO_URL/models 2>/dev/null | /usr/bin/python3 -c 'import sys,json; print(len(json.load(sys.stdin).get(\"data\",[])))' 2>/dev/null || echo '?')"
+  echo "  Ollama modelos:    $(curl -s --max-time 3 $OLLAMA_URL/api/tags 2>/dev/null | /usr/bin/python3 -c 'import sys,json; print(len(json.load(sys.stdin).get(\"models\",[])))' 2>/dev/null || echo '?')"
+  echo ""
+  echo "  Default: $AI_HUB_DEFAULT_MODEL (LM Studio local)"
+  echo "  Priority: $MODEL_ROUTING_PRIORITY"
+  echo "  Paid providers enabled: $ENABLE_PAID_PROVIDERS"
+  exit 0
+fi

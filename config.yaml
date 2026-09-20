@@ -1,0 +1,282 @@
+model:
+  default: omniroute/auto
+  provider: custom:omniroute
+  aliases:
+    opus: lmstudio/prism-ml/bonsai-27b
+    sonnet: lmstudio/zai-org/glm-4.6v-flash
+    haiku: ollama/llama3.2:3b
+    fast: ollama/llama3.2:3b
+    coder: lmstudio/zai-org/glm-4.6v-flash
+    reason: lmstudio/zai-org/glm-4.6v-flash
+    vision: lmstudio/qwen/qwen3-vl-4b
+  ollama_num_ctx: 65536
+  api_key: sk-no-auth
+  api_mode: chat_completions
+providers:
+  omniroute:
+    base_url: http://127.0.0.1:9500/v1
+    api: http://127.0.0.1:9500/v1
+    name: SynK-IA OmniRoute (único hub canónico)
+  lmstudio:
+    base_url: http://localhost:1234/v1
+    api: http://localhost:1234/v1
+    name: LM Studio local (7 modelos verificados)
+  ollama:
+    base_url: http://127.0.0.1:11435/v1
+    api: http://127.0.0.1:11435/v1
+    name: Ollama local (synk-ia-ollama container)
+fallback_providers:
+  - name: OmniRoute (cloud-free primero)
+    provider: omniroute
+    base_url: http://127.0.0.1:9500
+    api_key: sk-no-auth
+    model: omni/cloud-free
+    reason: Hub canónico — política cloud-free primero, local fallback
+  - name: LM Studio local
+    provider: lmstudio
+    base_url: http://localhost:1234/v1
+    api_key: lm-studio
+    model: zai-org/glm-4.6v-flash
+    reason: Coder+reasoning local, cero costo
+  - name: Ollama local
+    provider: ollama
+    base_url: http://127.0.0.1:11435/v1
+    api_key: ollama
+    model: llama3.2:3b
+    reason: 3B ligero, realtime/lightweight
+agent:
+  restart_drain_timeout: 30
+  reasoning_effort: minimal
+terminal:
+  backend: daytona
+web:
+  search_backend: ddgs
+compression:
+  threshold: 0.85
+display:
+  language: es
+wake_word:
+  enabled: true
+approvals:
+  destructive_slash_confirm: false
+command_allowlist:
+  - pipe remote content to shell
+  - overwrite project env/config via redirection
+  - script execution via heredoc
+  - tirith:raw_ip_url
+  - docker restart/stop/kill (container lifecycle)
+  - tirith:plain_http_to_sink
+  - tirith:private_network_access
+  - hermes update (restarts gateway, kills running agents)
+  - script execution via -e/-c flag
+  - shell command via -c/-lc flag
+onboarding:
+  seen:
+    openclaw_residue_cleanup: true
+    tool_progress_prompt: true
+    busy_input_prompt: true
+_config_version: 37
+custom_providers:
+  - name: SynK-IA Smart Gateway
+    slug: skyone
+    base_url: http://127.0.0.1:3120/v1
+    api_key: sk-no-auth
+    api_mode: chat_completions
+    discover_models: true
+    models:
+      - nvidia/nemotron-3-super-120b-a12b
+      - nvidia/nemotron-3.5-lightning-30b-a3b
+      - nvidia/nemotron-4-340b-instruct
+      - nvidia/llama-3.1-nemotron-70b-instruct
+      - meta/codellama-70b
+      - mistralai/codestral-22b-instruct-v0.1
+      - meta/llama-3.2-90b-vision-instruct
+      - gemini-3.5-flash-lite
+      - gemini-3.5-flash
+      - gemma-4-31b-it
+      - inclusionai/ling-3.0-flash-sante:free
+      - inclusionai/ling-3.0-flash-fin:free
+      - dots-studio/dots-3-note-preview:free
+      - liquid/lfm-2.5-2.6b:free
+      - nvidia/nemotron-3.5-lightning:free
+      - thinkingmachines/inkling-small:free
+      - poolside/laguna-s-2.1:free
+      - thinkingmachines/inkling:free
+      - poolside/laguna-xs-2.1:free
+      - cohere/north-mini-code:free
+      - nvidia/nemotron-3.5-content-safety:free
+      - nvidia/nemotron-3-ultra-550b-a55b:free
+      - nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+      - google/gemma-4-26b-a4b-it:free
+      - google/gemma-4-31b-it:free
+      - google/lyria-3-pro-preview
+      - google/lyria-3-clip-preview
+      - nvidia/nemotron-3-super-120b-a12b:free
+      - openrouter/free
+      - mistralai/Mistral-7B-Instruct-v0.3
+      - meta-llama/Llama-3.1-8B-Instruct
+      - Qwen/Qwen2.5-7B-Instruct
+      - google/gemma-2-9b-it
+      - microsoft/Phi-3-mini-4k-instruct
+      - claude-3-5-haiku-20241022
+      - claude-3-haiku-20240307
+    model: claude-sonnet-no-thinking
+  - name: LM Studio
+    slug: lmstudio
+    base_url: http://127.0.0.1:1234/v1
+    api_key: lm-studio-local
+    api_mode: chat_completions
+    discover_models: true
+    models:
+      - lmstudio-community/qwen3.8-27b-q4_k_m.gguf/qwen3.8q4_k_m.gguf
+      - lmstudio-community/qwen3.8-27b-q4_k_m.gguf/qwen38-q4km.gguf
+      - deepseek-v4-flash-0731-abliterated-ds4-headroom128
+      - deepseek-r1-distill-qwen-14b-heretic
+      - deepseek-v4-flash
+      - baidu/ernie-4.5-21b-a3b
+      - qwen/qwen3.6-27b
+      - nvidia/nemotron-3-nano-4b
+      - liquid/lfm2.5-1.2b
+      - ruvltra-claude-code
+      - microsoft/phi-4-reasoning-plus
+      - zai-org/glm-4.6v-flash
+      - openai/gpt-oss-20b
+      - text-embedding-nomic-embed-text-v1.5
+  - name: Ollama (local)
+    slug: ollama
+    base_url: http://127.0.0.1:11434/v1
+    api_key: ollama
+    api_mode: chat_completions
+    discover_models: true
+    models:
+      - llama3.2:1b
+      - qwen2.5:7b
+      - llama3.2:3b
+      - llama3.2-vision:11b
+      - glm-ocr:latest
+      - qwen3.5:latest
+      - nomic-embed-text:latest
+      - qwen2.5-coder:7b
+TELEGRAM_HOME_CHANNEL: 5665555949
+language: es
+_last_synced: 2026-09-03T10:46:30Z live from smart-gateway+lmstudio+ollama
+_note: heaven-hub removed; skyone is the primary provider
+mcp_servers:
+  synkia-toolbox:
+    url: http://localhost:9910/mcp
+  homelab-monitor:
+    url: http://localhost:9810/mcp
+    enabled: true
+  hugging_face:
+    url: https://huggingface.co/mcp
+    auth: oauth
+    enabled: true
+  notion:
+    url: https://mcp.notion.com/mcp
+    auth: oauth
+    enabled: true
+  sentry:
+    url: https://mcp.sentry.dev/mcp
+    auth: oauth
+    enabled: true
+  paypal:
+    url: https://mcp.paypal.com/sse
+    auth: oauth
+    enabled: true
+webui:
+  dashboard:
+    enabled: always
+    url: https://hermes-webui.hermes-webui.orb.local
+platform_toolsets:
+  cli:
+    - bfl
+    - browser
+    - clarify
+    - code_execution
+    - computer_use
+    - cronjob
+    - delegation
+    - file
+    - homeassistant
+    - image_gen
+    - kanban
+    - memory
+    - session_search
+    - skills
+    - terminal
+    - todo
+    - tts
+    - vision
+    - web
+    - x_search
+known_plugin_toolsets:
+  cli:
+    - a2a
+    - spotify
+known_builtin_toolsets:
+  cli:
+    - bfl
+    - browser
+    - clarify
+    - code_execution
+    - computer_use
+    - context_engine
+    - cronjob
+    - delegation
+    - discord
+    - discord_admin
+    - file
+    - homeassistant
+    - image_gen
+    - memory
+    - session_search
+    - skills
+    - spotify
+    - stt
+    - terminal
+    - todo
+    - tts
+    - video
+    - video_gen
+    - vision
+    - web
+    - x_search
+    - yuanbao
+
+# ── Security ──────────────────────────────────────────────────────────
+# Secret redaction is ON by default — strings that look like API keys,
+# tokens, and passwords are masked in tool output, logs, and chat
+# responses before the model or user ever sees them. Set redact_secrets
+# to false to disable (e.g. when developing the redactor itself).
+# tirith pre-exec scanning is enabled by default when the tirith binary
+# is available. Configure via security.tirith_* keys or env vars
+# (TIRITH_ENABLED, TIRITH_BIN, TIRITH_TIMEOUT, TIRITH_FAIL_OPEN).
+#
+# security:
+#   redact_secrets: true
+#   tirith_enabled: true
+#   tirith_path: "tirith"
+#   tirith_timeout: 5
+#   tirith_fail_open: true
+
+# ── Fallback Model ────────────────────────────────────────────────────
+# Automatic provider failover when primary is unavailable.
+# Uncomment and configure to enable. Triggers on rate limits (429),
+# overload (529), service errors (503), or connection failures.
+#
+# Supported providers:
+#   openrouter   (OPENROUTER_API_KEY)  — routes to any model
+#   openai-codex (OAuth — hermes auth) — OpenAI Codex
+#   nous         (OAuth — hermes auth) — Nous Portal
+#   zai          (ZAI_API_KEY)         — Z.AI / GLM
+#   kimi-coding  (KIMI_API_KEY)        — Kimi / Moonshot
+#   kimi-coding-cn (KIMI_CN_API_KEY)   — Kimi / Moonshot (China)
+#   minimax      (MINIMAX_API_KEY)     — MiniMax
+#   minimax-cn   (MINIMAX_CN_API_KEY)  — MiniMax (China)
+#   bedrock      (AWS IAM / boto3)     — AWS Bedrock (Converse API)
+#
+# For custom OpenAI-compatible endpoints, add base_url and key_env.
+#
+# fallback_model:
+#   provider: openrouter
+#   model: anthropic/claude-sonnet-4
