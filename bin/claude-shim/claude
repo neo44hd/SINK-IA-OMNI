@@ -1,0 +1,69 @@
+#!/usr/bin/env node
+// claude-shim v1.1 — wrapper para el binario Caskroom que omite la validación
+// local de modelos y reenvía cada petición `claude -p "<prompt>"` al relay
+// de OmniRoute (http://127.0.0.1:9500/v1/chat/completions).
+//
+// Cambios v1.1:
+//   - HTTP timeout 90s (evita cuelgues)
+//   - max_tokens=600 (recorta thinking-models)
+//   - modelo forzado = "local-fast" (ollama llama3.2:3b, no-thinking) si
+//     OMNI_FAST=1; sin eso usa "local-claude-code" (lmstudio)
+'use strict';
+const http = require('http');
+const OMNI = process.env.OMNI_BASE_URL || 'http://127.0.0.1:9500';
+const USE_FAST = process.env.OMNI_FAST === '1';
+
+function die(msg, code = 1) { console.log(`claude-shim: ${msg}`); process.exit(code); }
+
+function postChat(body) {
+  return new Promise((resolve, reject) => {
+    const data = Buffer.from(JSON.stringify(body));
+    const r = http.request({
+      method: 'POST', host: '127.0.0.1', port: 9500, path: '/v1/chat/completions',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': data.length }
+    }, res => {
+      let buf = ''; res.on('data', c => buf += c);
+      res.on('end', () => { try { resolve(JSON.parse(buf)); } catch (_) { reject(new Error(`bad json: ${buf.slice(0,200)}`)); } });
+    });
+    r.setTimeout(90000, () => { r.destroy(new Error('omni 90s timeout')); });
+    r.on('error', reject);
+    r.write(data); r.end();
+  });
+}
+
+(async () => {
+  const argv = process.argv.slice(2);
+  if (argv.length === 0 || argv.includes('-h') || argv.includes('--help')) {
+    console.log('claude-shim v1.1 — bypass Validación Caskroom, vía OmniRoute.\nUso: claude -p "<prompt>"  (--model se ignora)');
+    process.exit(0);
+  }
+  if (argv.length === 1 && argv[0] === '--version') {
+    console.log('claude-shim v1.1 (SynK-IA → OmniRoute :9500)');
+    process.exit(0);
+  }
+
+  let prompt = null;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '-p' || a === '--print')      { prompt = argv[i+1] || ''; i++; }
+    else if (a === '--model' || a === '-m') { /* consumed */ i++; }
+    else if (!a.startsWith('-') && prompt === null) { prompt = a; }
+  }
+  if (!prompt || !prompt.trim()) die('sin prompt tras -p/--print');
+
+  const sys = `Eres Claude Code (claude.com/claude-code) ejecutándose dentro del wrapper claude-shim v1.1, gestionado por SynK-IA-OMNI vía OmniRoute relay (http://127.0.0.1:9500). Usuario: David (id 5665555949). Responde DIRECTO sin thinking previo, en español salvo que pidan otro idioma.`;
+
+  const out = await postChat({
+    model: USE_FAST ? 'local-fast' : 'local-claude-code',
+    max_tokens: 600,
+    temperature: 0.2,
+    messages: [{ role: 'system', content: sys }, { role: 'user', content: prompt }]
+  }).catch(e => die(`OmniRoute: ${e.message}`));
+
+  const c = (out.choices||[])[0];
+  if (!c) die(`OmniRoute sin choices: ${out.error ? JSON.stringify(out.error).slice(0,200) : 'vacio'}`);
+  const content = (c.message && c.message.content) || '';
+  if (!content.trim()) die('modelo devolvió contenido vacío');
+  process.stdout.write(content.replace(/<\/?think>/g, '').trim() + '\n');
+  process.exit(0);
+})().catch(e => die(e.message));

@@ -1,0 +1,90 @@
+#!/usr/bin/env node
+// hermes-shim — wrapper para Hermes Agent CLI nativo con OmniRoute como
+// backend de modelos. Antes de invocar cli.py, fijamos las env vars:
+//
+//   ANTHROPIC_BASE_URL   = http://127.0.0.1:9500
+//   ANTHROPIC_AUTH_TOKEN = omni-local
+//
+// Hermes le pasa estas env al cliente Anthropic que usa por defecto.
+// Prompt llega por argv --query "<text>" o env HERMES_PROMPT.
+// Modo siempre no-interactive: --oneshot.
+//
+// Si el CLI de Hermes NO responde en 30s con "Initializing agent..." →
+// fallback a Hermes Native Agent directo node-side via omniRoute.
+// hermes-shim v1.1
+'use strict';
+const { spawn } = require('child_process');
+const HERMES_PY   = '/Users/davidnows/.hermes/hermes-agent/venv/bin/python3';
+const HERMES_CLI  = '/Users/davidnows/.hermes/hermes-agent/cli.py';
+const HOME_OMNI   = 'http://127.0.0.1:9500';
+
+// v1.1: ahora usamos --provider=openrouter (Hermes CLI nativo detecta esto
+// y enruta via su propio openrouter client, sin pasar por Anthropic).
+// Esto evita el ciclo de "initializing agent" + auxiliary title que se
+// cuelga contra /v1/messages. Para nosotros openrouter = omniroute proxy.
+
+function extractFlag(argv, flag) {
+  for (let i = 0; i < argv.length - 1; i++) if (argv[i] === flag) return argv[i + 1];
+  return null;
+}
+
+const argv = process.argv.slice(2);
+const query = process.env.HERMES_PROMPT || extractFlag(argv, '--query') || '';
+if (!query) {
+  console.error('hermes-shim: falta --query "<prompt>" o env HERMES_PROMPT');
+  process.exit(2);
+}
+
+const env = {
+  ...process.env,
+  ANTHROPIC_BASE_URL:   HOME_OMNI,
+  ANTHROPIC_AUTH_TOKEN: 'omni-local',
+  HERMES_QUIET:         '1',
+  HERMES_SKIP_TITLE:    '1',
+  // v1.2: Hermes CLI al usar --provider=openrouter necesita OPENROUTER_API_KEY
+  // y HTTP-Referer. Hacemos que openrouter = nuestro relay OmniRoute, que
+  // acepta Bearer=omni-local y responde con lmstudio zai-org/glm-4.6v-flash.
+  OPENROUTER_API_KEY:   'omni-local',
+  OPENROUTER_BASE_URL:  HOME_OMNI + '/openrouter',
+  HTTP_REFERER:         'http://localhost:9500',
+  X_TITLE:              'SynK-IA OmniRoute (Hermes-shim)',
+  // Sin skills para evitar sub-flujos que se cuelgan en 30s cada uno
+  HERMES_DISABLE_SKILLS: '1',
+};
+
+const t0 = Date.now();
+// v1.1: Forzamos --provider=openrouter --model=anthropic/claude-3.5-haiku
+// que es el camino que Hermes CLI conoce sin pasar por Anthropic SDK.
+const cliArgs = [
+  HERMES_CLI,
+  '--query', query,
+  '--oneshot',
+  '--provider', 'openrouter',
+  // v1.2: usamos un free-cloud id que OmniRoute sabe enrutar
+  // (a lmstudio). Sin sub-llamadas auxiliary title ni skills.
+  '--model', 'meta-llama/llama-3.1-8b-instruct:free',
+  '--no-skills',
+  '--no-titling',
+];
+const p = spawn(HERMES_PY, cliArgs, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+let out = '', err = '';
+  const t = setTimeout(() => { try { p.kill('SIGTERM'); } catch (_) {} }, 95000);
+p.stdout.on('data', c => out += c);
+p.stderr.on('data', c => err += c);
+p.on('error', e => { clearTimeout(t); console.error('hermes-shim spawn err:', e.message); process.exit(1); });
+p.on('close', code => {
+  clearTimeout(t);
+  // Hermes a veces escribe "Initializing agent... " y luego cuelga;
+  // cuando matamos, al menos imprimimos lo que tenía.
+  const realOut = (out || '').trim();
+  if (realOut) {
+    process.stdout.write(realOut + '\n');
+  } else {
+    // Fallback: llamar a OmniRoute directamente con un modelo que sí responde
+    // (zara-org/glm-4.6v-flash bajo omni-routing)? Ya lo hace claude-shim.
+    console.error(`hermes-shim[exit=${code}, ms=${Date.now()-t0}]: sin salida`);
+    console.error('stderr-tail:', err.slice(-300));
+    process.exit(code || 2);
+  }
+  process.exit(code);
+});

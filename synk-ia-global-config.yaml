@@ -49,10 +49,10 @@ services:
   openclaw:
     name: "OpenClaw"
     type: "mcp-gateway"
-    port: 7999
+    port: 18790
     protocol: "http"
     host: "localhost"
-    baseUrl: "http://localhost:7999"
+    baseUrl: "http://localhost:18790"
     docker:
       service: "openclaw"
       network: "synkia-os-net"
@@ -70,34 +70,47 @@ services:
   ollama:
     name: "Ollama"
     type: "local-llm"
-    port: 11434
+    port: 11435
     protocol: "http"
     host: "127.0.0.1"
-    baseUrl: "http://127.0.0.1:11434"
-    critical: true
+    baseUrl: "http://127.0.0.1:11435"
+    critical: false
     autoRestart: false
-    healthCheck: "/api/version"
-    models: 7
-    description: "Local LLM provider with 7 models (llama3.2-3b, qwen2.5-coder:7b, etc.)"
+    healthCheck: "/api/tags"
+    models: 1
+    description: "Local LLM provider (container synk-ia-ollama, llama3.2:3b)"
     role: "local-inference"
-    environment: "host"
+    environment: "docker"
 
-  # LLM Gateway & Proxy
-  litellm:
-    name: "LiteLLM Gateway"
+  # LLM Gateway & Proxy (OmniRoute — replaced the legacy LiteLLM hub at :4000)
+  omniroute:
+    name: "OmniRoute"
     type: "llm-proxy"
-    port: 4000
+    port: 9500
     protocol: "http"
     host: "localhost"
-    baseUrl: "http://localhost:4000/v1"
+    baseUrl: "http://localhost:9500"
+    apiPath: "/v1"
     critical: true
     autoRestart: true
-    description: "OpenAI-compatible gateway proxying to Ollama, cloud providers, etc."
+    healthCheck: "/health"
+    description: "OpenAI-compatible multi-provider gateway (14 providers, auto-fallback)"
     role: "model-proxy"
     providers:
       - "ollama"
-      - "litellm-cloud"
-      - "custom-endpoints"
+      - "lmstudio"
+      - "openrouter"
+      - "nvidia"
+      - "gemini"
+      - "groq"
+      - "cohere"
+      - "deepseek"
+      - "qwen"
+      - "siliconflow"
+      - "zai"
+      - "mistral"
+      - "venice"
+      - "opencode"
 
   # Chat Interface
   openwebui:
@@ -137,16 +150,16 @@ services:
   qdrant:
     name: "Qdrant"
     type: "vector-db"
-    port: 6333
+    port: 6335
     protocol: "http"
     host: "localhost"
-    baseUrl: "http://localhost:6333"
+    baseUrl: "http://localhost:6335"
     docker:
       service: "qdrant"
       network: "synkia-os-net"
     critical: true
     autoRestart: true
-    healthCheck: "/health"
+    healthCheck: "/healthz"
     description: "Vector database for embeddings and semantic search"
     role: "memory-storage"
 
@@ -180,7 +193,7 @@ services:
       network: "ruflow_default"
     critical: false
     autoRestart: true
-    healthCheck: "/api/v1/health"
+    healthCheck: "/health"
     description: "Job-resume matching and scoring engine"
     role: "specialized-ai"
     capabilities:
@@ -243,17 +256,17 @@ services:
   heaven-hub:
     name: "Heaven Hub"
     type: "knowledge-hub"
-    port: 8765
+    port: 8010
     protocol: "http"
     host: "localhost"
-    baseUrl: "http://localhost:8765"
+    baseUrl: "http://localhost:8010"
     docker:
-      service: "sinkia-heaven-hub"
+      service: "sinkia-heaven"
       network: "synkia-os-net"
-      image: "heaven-hub-fixed:latest"
+      image: "sinkia-os-heaven-platform:latest"
     critical: false
     autoRestart: true
-    healthCheck: "/health"
+    healthCheck: "/"
     description: "Heaven Hub for knowledge base management and content aggregation"
     role: "knowledge-management"
     capabilities:
@@ -266,14 +279,14 @@ services:
   heaven-search:
     name: "Heaven Search Platform"
     type: "search-engine"
-    port: 8766
+    port: 8012
     protocol: "http"
     host: "localhost"
-    baseUrl: "http://localhost:8766"
+    baseUrl: "http://localhost:8012"
     docker:
-      service: "sinkia-heaven-search"
+      service: "sinkia-heaven"
       network: "synkia-os-net"
-      image: "heaven-search-platform:latest"
+      image: "sinkia-os-heaven-platform:latest"
     critical: false
     autoRestart: true
     healthCheck: "/health"
@@ -289,14 +302,14 @@ services:
   heaven-agent:
     name: "Heaven Ecosystem Agent"
     type: "autonomous-agent"
-    port: 8767
+    port: 8009
     protocol: "http"
     host: "localhost"
-    baseUrl: "http://localhost:8767"
+    baseUrl: "http://localhost:8009"
     docker:
-      service: "sinkia-heaven-agent"
+      service: "sinkia-heaven"
       network: "synkia-os-net"
-      image: "heaven-ecosystem-agent:latest"
+      image: "sinkia-os-heaven-platform:latest"
     critical: false
     autoRestart: true
     healthCheck: "/health"
@@ -312,17 +325,17 @@ services:
   odysseus:
     name: "Odysseus"
     type: "master-orchestrator"
-    port: 9999
+    port: 7080
     protocol: "http"
     host: "localhost"
-    baseUrl: "http://localhost:9999"
+    baseUrl: "http://localhost:7080"
     docker:
       service: "odysseus"
       network: "synkia-os-net"
       image: "odysseus-odysseus:latest"
-    critical: true
-    autoRestart: true
-    healthCheck: "/health"
+    critical: false
+    autoRestart: false
+    healthCheck: "/"
     description: "Master orchestrator for coordinating all SynK-IA and Heaven services (Odysseus journey visualization)"
     role: "master-orchestration"
     capabilities:
@@ -457,10 +470,9 @@ orchestration:
     retries: 3
     autoRestartThreshold: 2  # failures before auto-restart
     criticalServices:
-      - "sinkia-ops"
-      - "openclaw"
+      - "omniroute"
       - "ollama"
-      - "qdrant"
+      - "hub-ai-local"
 
   # Load balancing
   loadBalancing:

@@ -40,3 +40,6 @@ Thumbs.db
 dist/
 build/
 out/
+
+# Provider API keys (never commit)
+.synkia-ai-hub/.env.providers

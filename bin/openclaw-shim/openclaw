@@ -1,0 +1,72 @@
+#!/usr/bin/env node
+// openclaw-shim — wrapper para `openclaw agent`. Estrategia:
+// 1. Si hay Gateway vivo en 127.0.0.1:18790 → usa el gateway (sin --local).
+// 2. Si no hay Gateway → fallback a --local embedded.
+// El prompt llega como argv --message "<text>" o por env OC_PROMPT.
+// El timeout como --timeout <seg> o env OC_TIMEOUT (default 60).
+'use strict';
+const { spawn } = require('child_process');
+const net = require('net');
+
+const REAL_BIN = '/opt/homebrew/bin/openclaw';
+const GW_HOST = '127.0.0.1';
+const GW_PORT = 18790;
+
+function probeGateway() {
+  return new Promise((resolve) => {
+    const s = net.connect(GW_PORT, GW_HOST);
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; try { s.destroy(); } catch (_) {} resolve(v); } };
+    s.setTimeout(400, () => finish(false));
+    s.on('connect', () => finish(true));
+    s.on('error', () => finish(false));
+  });
+}
+
+function extractFlag(argv, flag) {
+  for (let i = 0; i < argv.length - 1; i++) if (argv[i] === flag) return argv[i + 1];
+  return null;
+}
+
+function runAgent(message, timeoutSec, useLocal) {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    const args = ['agent'];
+    if (useLocal) args.push('--local');
+    args.push('--message', message, '--timeout', String(timeoutSec));
+    const p = spawn(REAL_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '', err = '';
+    const t = setTimeout(() => { try { p.kill('SIGTERM'); } catch (_) {} }, (timeoutSec + 30) * 1000);
+    p.stdout.on('data', c => out += c);
+    p.stderr.on('data', c => err += c);
+    p.on('error', e => { clearTimeout(t); resolve({ ok:false, code:-1, out, err, error: e.message, mode: useLocal?'local':'gateway', ms: Date.now() - t0 }); });
+    p.on('close', code => {
+      clearTimeout(t);
+      resolve({ ok: code === 0, code, out, err, mode: useLocal?'local':'gateway', ms: Date.now() - t0 });
+    });
+  });
+}
+
+const argv = process.argv.slice(2);
+const cmd = argv[0];
+if (cmd !== 'agent') {
+  console.error(`openclaw-shim: solo soporta 'agent' como subcomando (recibido: ${cmd || '(vacío)'})`);
+  process.exit(2);
+}
+const message = process.env.OC_PROMPT || extractFlag(argv, '--message');
+const timeoutSec = parseInt(process.env.OC_TIMEOUT || extractFlag(argv, '--timeout') || '60', 10);
+if (!message) {
+  console.error('openclaw-shim: falta --message "<prompt>" o env OC_PROMPT');
+  process.exit(2);
+}
+
+probeGateway().then((up) => {
+  return runAgent(message, timeoutSec, !up);
+}).then(r => {
+  process.stdout.write(r.out || '');
+  if (!r.ok) {
+    const tail = (r.err || r.out || '').slice(0, 240);
+    process.stderr.write(`openclaw-shim[mode=${r.mode}, code=${r.code}]: ${tail}`);
+  }
+  process.exit(r.ok ? 0 : (r.code ?? 1));
+}).catch(e => { console.error('openclaw-shim fatal:', e.message); process.exit(1); });
