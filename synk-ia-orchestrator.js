@@ -1184,6 +1184,35 @@ async function startOrchestratorAPI() {
           }
           if (!r) throw new Error(`All providers exhausted: tried ${triedProviders.join(', ')}`);
 
+          // ── Streaming (SSE) support ──────────────────────────────────────
+          // Clients like OpenClaw request stream=true and parse SSE. We don't
+          // stream token-by-token upstream yet, but we emit a valid
+          // chat.completion.chunk sequence so SSE clients work correctly.
+          if (payload.stream === true) {
+            const cid = 'chatcmpl-' + Date.now();
+            const modelName = chosen?.model || payload.model || 'auto';
+            const chunk = (delta, finish) => `data: ${JSON.stringify({
+              id: cid, object: 'chat.completion.chunk',
+              created: Math.floor(Date.now() / 1000), model: modelName,
+              choices: [{ index: 0, delta, finish_reason: finish }]
+            })}\n\n`;
+            res.writeHead(200, {
+              'Content-Type': 'text/event-stream; charset=utf-8',
+              'Cache-Control': 'no-cache',
+              'Connection': 'keep-alive',
+              'Access-Control-Allow-Origin': '*'
+            });
+            res.write(chunk({ role: 'assistant', content: '' }, null));
+            res.write(chunk({ content: r.text || '' }, null));
+            if (r.tool_calls && r.tool_calls.length > 0) {
+              res.write(chunk({ tool_calls: r.tool_calls }, null));
+            }
+            res.write(chunk({}, r.finish_reason || 'stop'));
+            res.write('data: [DONE]\n\n');
+            res.end();
+            return;
+          }
+
           const openaiResp = {
             id: 'chatcmpl-' + Date.now(),
             object: 'chat.completion',

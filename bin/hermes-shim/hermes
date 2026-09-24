@@ -41,30 +41,23 @@ const env = {
   ANTHROPIC_AUTH_TOKEN: 'omni-local',
   HERMES_QUIET:         '1',
   HERMES_SKIP_TITLE:    '1',
-  // v1.2: Hermes CLI al usar --provider=openrouter necesita OPENROUTER_API_KEY
-  // y HTTP-Referer. Hacemos que openrouter = nuestro relay OmniRoute, que
-  // acepta Bearer=omni-local y responde con lmstudio zai-org/glm-4.6v-flash.
-  OPENROUTER_API_KEY:   'omni-local',
-  OPENROUTER_BASE_URL:  HOME_OMNI + '/openrouter',
-  HTTP_REFERER:         'http://localhost:9500',
-  X_TITLE:              'SynK-IA OmniRoute (Hermes-shim)',
   // Sin skills para evitar sub-flujos que se cuelgan en 30s cada uno
   HERMES_DISABLE_SKILLS: '1',
 };
 
 const t0 = Date.now();
-// v1.1: Forzamos --provider=openrouter --model=anthropic/claude-3.5-haiku
-// que es el camino que Hermes CLI conoce sin pasar por Anthropic SDK.
+// v1.3: dejamos que Hermes use su PROPIA config nativa
+// (provider: custom:omniroute, model: omniroute/auto), que aplica la política
+// cloud-free primero / local fallback. NO forzamos --provider/--model: forzar
+// 'openrouter/meta-llama/llama-3.1-8b-instruct:free' apuntaba a un modelo ya
+// retirado y rompía el arranque (404 en auxiliary title).
+// NOTA: '--no-skills' / '--no-titling' NO son flags válidos en esta versión
+// del CLI (daban "Could not consume arg"). El titling se desactiva con
+// HERMES_SKIP_TITLE=1 y las skills no se precargan sin -s/--skills.
 const cliArgs = [
   HERMES_CLI,
   '--query', query,
   '--oneshot',
-  '--provider', 'openrouter',
-  // v1.2: usamos un free-cloud id que OmniRoute sabe enrutar
-  // (a lmstudio). Sin sub-llamadas auxiliary title ni skills.
-  '--model', 'meta-llama/llama-3.1-8b-instruct:free',
-  '--no-skills',
-  '--no-titling',
 ];
 const p = spawn(HERMES_PY, cliArgs, { env, stdio: ['ignore', 'pipe', 'pipe'] });
 let out = '', err = '';

@@ -33,6 +33,11 @@ function runAgent(message, timeoutSec, useLocal) {
     const t0 = Date.now();
     const args = ['agent'];
     if (useLocal) args.push('--local');
+    // Fijamos agente + modelo para no heredar un modelo persistido de una
+    // sesión antigua (p.ej. 'gateway/cloud-auto', ya inexistente).
+    const agentId = process.env.OC_AGENT || 'superheroe';
+    const modelId = process.env.OC_MODEL || 'omniroute/auto';
+    args.push('--agent', agentId, '--model', modelId);
     args.push('--message', message, '--timeout', String(timeoutSec));
     const p = spawn(REAL_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '', err = '';

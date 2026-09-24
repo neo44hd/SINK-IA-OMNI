@@ -1,0 +1,104 @@
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:9500/v1",
+    "ANTHROPIC_AUTH_TOKEN": "omni-local",
+    "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "190000",
+    "MAIND_BASE_URL": "http://127.0.0.1:9500",
+    "CLOUDFLARE_ZONE_ID": "7ee06baabd732b2227b578842e9cbf4b"
+  },
+  "model": "claude-sonnet-4-5",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/on_session_start.sh"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/on_user_prompt.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/on_stop.sh"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/on_session_end.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/on_pre_tool_use.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/on_post_tool_use.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "extraKnownMarketplaces": {
+    "claude-code-warp": {
+      "source": {
+        "source": "github",
+        "repo": "warpdotdev/claude-code-warp"
+      }
+    }
+  },
+  "language": "espa\u00f1ol",
+  "autoUpdatesChannel": "stable",
+  "minimumVersion": "2.1.261",
+  "tui": "fullscreen",
+  "theme": "dark-ansi",
+  "autoScrollEnabled": true,
+  "fileCheckpointingEnabled": false,
+  "askUserQuestionTimeout": "5m",
+  "crossSessionInbound": "refuse",
+  "mcpServers": {
+    "graphify": {
+      "command": "/Users/davidnows/.local/bin/graphify",
+      "args": [
+        "/Users/davidnows/synkia/repos/synk-ia",
+        "--mcp"
+      ]
+    }
+  },
+  "enabledPlugins": {
+    "warp@claude-code-warp": true
+  }
+}
