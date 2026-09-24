@@ -83,6 +83,26 @@ module.exports = {
       min_uptime: '10s'
     },
     {
+      name: 'discoverer',
+      script: '/Users/davidnows/bin/discoverer.js',
+      // Buscador de tendencias: GitHub + Reddit + Discord + HN + arXiv + HF.
+      // Corre una vez cada 4 horas (el script termina y PM2 lo relanza por cron).
+      cron_restart: '0 */4 * * *',
+      autorestart: false,
+      instances: 1,
+      exec_mode: 'fork',
+      env: {
+        NODE_ENV: 'production',
+        NTFY_URL: 'http://127.0.0.1:8091',
+        NTFY_TOPIC: 'synkia'
+      },
+      error_file: '/Users/davidnows/.synkia-ai-hub/logs/discoverer-error.log',
+      out_file: '/Users/davidnows/.synkia-ai-hub/logs/discoverer-out.log',
+      merge_logs: true,
+      max_restarts: 3,
+      min_uptime: '5s'
+    },
+    {
       name: 'native-supervisor',
       script: '/Users/davidnows/bin/native-supervisor.js',
       instances: 1,

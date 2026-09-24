@@ -166,6 +166,9 @@ async function monitorAllServices() {
 
     // Auto-restart critical services
     if (health.status !== 'healthy' && serviceConfig.autoRestart && serviceConfig.critical) {
+      notifyNtfy(`Servicio crítico caído: ${serviceName}`,
+        `${serviceName} (${serviceConfig.port || '-'}) no responde: ${health.reason}. Intento de auto-restart en curso.`,
+        'high', ['rotating_light']);
       await autoRestartService(serviceName, serviceConfig);
     }
   }
@@ -501,12 +504,46 @@ const CLOUD_FAILOVER_CHAIN = [...VERIFIED_CLOUD_PROVIDERS, ...RESERVE_CLOUD_PROV
 // Backwards-compatible alias.
 const ACTIVE_CLOUD_PROVIDERS = CLOUD_FAILOVER_CHAIN;
 
+// ── Gateway prompt preamble ────────────────────────────────────────────────
+// BASE_PREAMBLE: neutral operational policy injected into EVERY request so
+// non-agent callers (ruflow, odysseus, heaven) behave sanely without per-service
+// config. Additive: placed BEFORE the caller's own system message so an agent's
+// identity still wins. AGENT_PREAMBLES: optional per-caller persona selected
+// with the `X-Agent` header (velinda | diosa | codiy | ruflow | odysseus).
+// Set OMNI_NO_PREAMBLE=1 to disable injection.
+const BASE_PREAMBLE =
+  'Eres un asistente técnico del stack SynK-IA. Responde en español, directo y ' +
+  'conciso, sin relleno ni disculpas innecesarias. No inventes: si no lo sabes, dilo. ' +
+  'Prefiere soluciones de coste cero (cloud-free primero, local sólo como último recurso).';
+
+const AGENT_PREAMBLES = {
+  velinda:  BASE_PREAMBLE + ' Perfil: agente de operaciones e infraestructura (docker, pm2, MCP, cloudflared, tailscale). Ejecutivo y orientado a acción.',
+  diosa:    BASE_PREAMBLE + ' Perfil: agente de conocimiento y memoria (recuperación, documentación, pipeline editorial). Reflexivo y estructurado.',
+  codiy:    BASE_PREAMBLE + ' Perfil: agente de ingeniería (código, refactor, tests, automatización, análisis). Técnico y preciso.',
+  ruflow:   BASE_PREAMBLE + ' Contexto: motor de matching CV↔oferta. Devuelve resultados estructurados y verificables.',
+  odysseus: BASE_PREAMBLE + ' Contexto: orquestador/visualizador del ecosistema. Respuestas breves y factuales.',
+};
+
+function resolvePreamble(agentHeader) {
+  if (process.env.OMNI_NO_PREAMBLE === '1') return null;
+  const id = String(agentHeader || '').trim().toLowerCase();
+  return AGENT_PREAMBLES[id] || BASE_PREAMBLE;
+}
+
 // Provider health (success-rate) tracking for the fallback chain
 const providerHealth = {};
 function noteProviderHealth(name, ok, ms) {
   providerHealth[name] = providerHealth[name] || { ok: 0, fail: 0, last_ms: 0 };
   if (ok) { providerHealth[name].ok++; providerHealth[name].last_ms = ms; }
-  else providerHealth[name].fail++;
+  else {
+    providerHealth[name].fail++;
+    // Pain reflex: a verified provider that fails repeatedly is degrading.
+    if (VERIFIED_CLOUD_PROVIDERS.includes(name) && providerHealth[name].fail % 3 === 0) {
+      notifyNtfy(`OmniRoute: ${name} degradado`,
+        `El provider ${name} acumula ${providerHealth[name].fail} fallos. El failover lo cubre, pero revisa su cuota/key.`,
+        'default', ['chart_with_downwards_trend']);
+    }
+  }
 }
 function getHealthyProviders(preferCloud = true) {
   const all = ['openrouter', 'nvidia', 'groq', 'cohere', 'gemini', 'mistral', 'qwen', 'siliconflow', 'zai', 'deepseek', 'venice', 'opencode', 'lmstudio', 'ollama'];
@@ -1029,6 +1066,9 @@ async function startOrchestratorAPI() {
             if (text || m.role === 'assistant') messages.push({ role: m.role, content: text });
           }
           if (messages.length === 0) throw new Error('Anthropic: messages[] vacío');
+          // Gateway preamble first so the caller's own system message wins.
+          const pre = resolvePreamble(req.headers['x-agent']);
+          if (pre) messages.unshift({ role: 'system', content: pre });
           const opts = {
             messages,
             max_tokens: payload.max_tokens || 1024,
@@ -1136,8 +1176,11 @@ async function startOrchestratorAPI() {
         const triedProviders = [];
         try {
           const payload = JSON.parse(body || '{}');
-          const messages = Array.isArray(payload.messages) ? payload.messages : [];
-          if (messages.length === 0) throw new Error('messages[] is required');
+          const incoming = Array.isArray(payload.messages) ? payload.messages : [];
+          if (incoming.length === 0) throw new Error('messages[] is required');
+          // Gateway preamble first so the caller's own system message wins.
+          const pre = resolvePreamble(req.headers['x-agent']);
+          const messages = pre ? [{ role: 'system', content: pre }, ...incoming] : incoming;
 
           const opts = {
             messages,
@@ -1234,6 +1277,10 @@ async function startOrchestratorAPI() {
           res.end(JSON.stringify(openaiResp, null, 2));
         } catch (err) {
           logEvent('error', `v1/chat/completions error: ${err.message}`);
+          // Pain reflex: no provider could serve this request.
+          notifyNtfy('OmniRoute: sin providers',
+            `Petición fallida. intentos: ${triedProviders.join(', ') || 'ninguno'}\n${err.message.slice(0, 200)}`,
+            'high', ['rotating_light', 'robot']);
           res.writeHead(500); res.end(JSON.stringify({ error: err.message, _tried: triedProviders }));
         }
       });
@@ -1296,6 +1343,41 @@ function generateRecommendations() {
   }
 
   return recommendations;
+}
+
+// ── NTFY push ("pain reflex") ───────────────────────────────────────────────
+// Publishes to the local ntfy server (odysseus-ntfy-1, :8091) so the stack can
+// signal anomalies to the phone without a Telegram round-trip. Deduplicated by
+// key with a cooldown so a chronic failure doesn't spam.
+const NTFY_URL   = process.env.NTFY_URL   || 'http://127.0.0.1:8091';
+const NTFY_TOPIC = process.env.NTFY_TOPIC || 'synkia';
+const _ntfySeen = new Map();
+const NTFY_COOLDOWN_MS = 5 * 60 * 1000;
+
+function notifyNtfy(title, message, priority = 'default', tags = ['warning']) {
+  if (process.env.OMNI_NO_NTFY === '1') return;
+  const key = `${title}|${message}`.slice(0, 200);
+  const now = Date.now();
+  const last = _ntfySeen.get(key);
+  if (last && (now - last) < NTFY_COOLDOWN_MS) return;
+  _ntfySeen.set(key, now);
+  try {
+    const data = Buffer.from(String(message));
+    const u = new URL(`${NTFY_URL.replace(/\/$/, '')}/${NTFY_TOPIC}`);
+    const req = http.request({
+      method: 'POST', host: u.hostname, port: u.port || 80, path: u.pathname,
+      headers: {
+        'Title': title, 'Priority': priority,
+        'Tags': Array.isArray(tags) ? tags.join(',') : String(tags),
+        'Content-Type': 'text/plain', 'Content-Length': data.length
+      }
+    }, (res) => res.resume());
+    req.on('error', (e) => { if (process.env.OMNI_NTFY_DEBUG === '1') console.error('ntfy error:', e.message); });
+    req.setTimeout(4000, () => { try { req.destroy(); } catch (_) {} });
+    req.write(data); req.end();
+  } catch (e) {
+    if (process.env.OMNI_NTFY_DEBUG === '1') console.error('ntfy error:', e.message);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
