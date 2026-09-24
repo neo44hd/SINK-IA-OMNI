@@ -372,7 +372,9 @@ const PROVIDERS = {
     type: 'openai',
     base_url: 'https://integrate.api.nvidia.com/v1',
     api_key: process.env.NVIDIA_API_KEY || '',
-    default_model: process.env.NVIDIA_DEFAULT_MODEL || 'mistralai/mistral-nemotron',
+    // Verified-live NIM models (probed 2026-09-24). Most meta/* and other
+    // IDs in the catalog return 404/410; these two respond.
+    default_model: process.env.NVIDIA_DEFAULT_MODEL || 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning',
     tier: 'cloud-free',
     tools_supported: false,
     free_tier: true,
@@ -481,11 +483,23 @@ const PROVIDERS = {
   }
 };
 
-// Providers whose key is verified working from this host (probed 2026-09-24):
-// openrouter ✅, gemini ✅, nvidia ~flaky. The rest (groq, deepseek, qwen,
-// siliconflow, zai, mistral, venice, opencode, cohere) return 401/402/403/429
-// and stay configured but are skipped by the automatic chain.
-const ACTIVE_CLOUD_PROVIDERS = ['openrouter', 'gemini', 'nvidia'];
+// ── Provider failover strategy (cost-zero, independent quotas) ─────────────
+// Each native provider has its OWN quota, even when the underlying model is
+// the same (e.g. nemotron via NVIDIA and via OpenRouter are two quotas).
+// So we fail over sequentially through every provider that has a key: if
+// OpenRouter exhausts its free tier, Gemini still has its own, then NVIDIA,
+// then the reserves. Local (lmstudio/ollama) is always the LAST resort.
+//
+//  - VERIFIED: keys confirmed live from this host (probe 2026-09-24).
+//  - RESERVE : configured keys currently returning 401/402/403/429 (no
+//              balance / blocked); kept in the chain so they are used the
+//              moment they get quota, at the cost of one short timeout.
+const VERIFIED_CLOUD_PROVIDERS = ['openrouter', 'gemini', 'nvidia'];
+const RESERVE_CLOUD_PROVIDERS = ['groq', 'cohere', 'zai', 'deepseek', 'mistral',
+                                  'qwen', 'siliconflow', 'venice', 'opencode'];
+const CLOUD_FAILOVER_CHAIN = [...VERIFIED_CLOUD_PROVIDERS, ...RESERVE_CLOUD_PROVIDERS];
+// Backwards-compatible alias.
+const ACTIVE_CLOUD_PROVIDERS = CLOUD_FAILOVER_CHAIN;
 
 // Provider health (success-rate) tracking for the fallback chain
 const providerHealth = {};
@@ -545,6 +559,7 @@ const LOGICAL_TO_REAL = {
   'gemini-3.5-flash':              { provider: 'gemini',  model: 'gemini-3.5-flash' },
   'gemini-pro':                    { provider: 'gemini',  model: 'gemini-2.5-flash' },
   'nvidia-nemotron':               { provider: 'nvidia',  model: 'mistralai/mistral-nemotron' },
+  'nvidia-nemotron-nano':          { provider: 'nvidia',  model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning' },
   'deepseek-chat':                 { provider: 'deepseek',     model: 'deepseek-chat' },
   'deepseek-reasoner':             { provider: 'deepseek',     model: 'deepseek-reasoner' },
   'qwen-plus':                     { provider: 'qwen',         model: 'qwen-plus' },
@@ -566,7 +581,12 @@ async function callProvider(providerName, model, prompt, opts = {}) {
   const prov = PROVIDERS[providerName];
   if (!prov) throw new Error(`Unknown provider: ${providerName}`);
   const tStart = Date.now();
-  logEvent('debug', `→ callProvider start`, { provider: providerName, model, has_key: !!prov.api_key, base_url: prov.base_url });
+  // Failover budget: verified providers get a normal window; reserve providers
+  // (currently no balance / blocked) get a short one so a dead link costs
+  // little before moving to the next quota. Local gets the longest.
+  const isReserve = RESERVE_CLOUD_PROVIDERS.includes(providerName);
+  const fetchTimeoutMs = isReserve ? 2000 : 4000;
+  logEvent('debug', `→ callProvider start`, { provider: providerName, model, has_key: !!prov.api_key, base_url: prov.base_url, timeout_ms: fetchTimeoutMs });
   const maxTokens = opts.max_tokens || 1024;
   const temperature = opts.temperature ?? 0.2;
 
@@ -593,7 +613,7 @@ async function callProvider(providerName, model, prompt, opts = {}) {
     }
     const res = await fetch(`${prov.base_url}/api/chat`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-    signal: AbortSignal.timeout(3500)
+      signal: AbortSignal.timeout(fetchTimeoutMs)
     });
     logEvent('debug', `   ollama HTTP ${res.status} (${Date.now()-tStart}ms)`);
     if (!res.ok) throw new Error(`Ollama HTTP ${res.status}: ${await res.text()}`);
@@ -622,7 +642,7 @@ async function callProvider(providerName, model, prompt, opts = {}) {
     const tFetch = Date.now();
     logEvent('debug', `   openai fetch ${providerName} → ${url} (model=${model})`);
     const res = await fetch(url, {
-      method: 'POST', headers, signal: AbortSignal.timeout(3500), body: JSON.stringify(body)
+      method: 'POST', headers, signal: AbortSignal.timeout(fetchTimeoutMs), body: JSON.stringify(body)
     });
     logEvent('debug', `   openai ${providerName} → HTTP ${res.status} (${Date.now()-tFetch}ms)`);
     if (!res.ok) throw new Error(`${providerName} HTTP ${res.status}: ${await res.text().then(t => t.slice(0,200))}`);
@@ -664,7 +684,7 @@ async function callProvider(providerName, model, prompt, opts = {}) {
     const tFetch = Date.now();
     logEvent('debug', `   gemini fetch → ${url} (model=${model})`);
     const res = await fetch(url, {
-      method: 'POST', headers, signal: AbortSignal.timeout(4500), body: JSON.stringify(body)
+      method: 'POST', headers, signal: AbortSignal.timeout(fetchTimeoutMs), body: JSON.stringify(body)
     });
     logEvent('debug', `   gemini → HTTP ${res.status} (${Date.now()-tFetch}ms)`);
     if (!res.ok) throw new Error(`gemini HTTP ${res.status}: ${await res.text().then(t => t.slice(0,200))}`);
