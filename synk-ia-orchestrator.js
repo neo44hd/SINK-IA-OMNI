@@ -372,7 +372,7 @@ const PROVIDERS = {
     type: 'openai',
     base_url: 'https://integrate.api.nvidia.com/v1',
     api_key: process.env.NVIDIA_API_KEY || '',
-    default_model: process.env.NVIDIA_DEFAULT_MODEL || 'meta/llama-3.1-70b-instruct',
+    default_model: process.env.NVIDIA_DEFAULT_MODEL || 'mistralai/mistral-nemotron',
     tier: 'cloud-free',
     tools_supported: false,
     free_tier: true,
@@ -481,6 +481,12 @@ const PROVIDERS = {
   }
 };
 
+// Providers whose key is verified working from this host (probed 2026-09-24):
+// openrouter ✅, gemini ✅, nvidia ~flaky. The rest (groq, deepseek, qwen,
+// siliconflow, zai, mistral, venice, opencode, cohere) return 401/402/403/429
+// and stay configured but are skipped by the automatic chain.
+const ACTIVE_CLOUD_PROVIDERS = ['openrouter', 'gemini', 'nvidia'];
+
 // Provider health (success-rate) tracking for the fallback chain
 const providerHealth = {};
 function noteProviderHealth(name, ok, ms) {
@@ -534,9 +540,11 @@ const LOGICAL_TO_REAL = {
   'negentropy-claude-opus-4.7-9b': { provider: 'lmstudio', model: 'prism-ml/bonsai-27b' },
   'ruvltra-claude-code':           { provider: 'lmstudio', model: 'zai-org/glm-4.6v-flash' },
   'deepseek-r1-0528-qwen3-8b':     { provider: 'lmstudio', model: 'zai-org/glm-4.6v-flash' },
-  'gemini-flash-latest':           { provider: 'gemini',  model: 'gemini-flash-latest' },
-  'gemini-2.0-flash-exp':          { provider: 'gemini',  model: 'gemini-2.0-flash-exp' },
-  'gemini-pro':                    { provider: 'gemini',  model: 'gemini-2.5-pro' },
+  'gemini-flash-latest':           { provider: 'gemini',  model: 'gemini-2.5-flash' },
+  'gemini-2.0-flash-exp':          { provider: 'gemini',  model: 'gemini-2.5-flash' },
+  'gemini-3.5-flash':              { provider: 'gemini',  model: 'gemini-3.5-flash' },
+  'gemini-pro':                    { provider: 'gemini',  model: 'gemini-2.5-flash' },
+  'nvidia-nemotron':               { provider: 'nvidia',  model: 'mistralai/mistral-nemotron' },
   'deepseek-chat':                 { provider: 'deepseek',     model: 'deepseek-chat' },
   'deepseek-reasoner':             { provider: 'deepseek',     model: 'deepseek-reasoner' },
   'qwen-plus':                     { provider: 'qwen',         model: 'qwen-plus' },
@@ -1029,7 +1037,7 @@ async function startOrchestratorAPI() {
           if (!r) {
             // Same cloud-free → local chain as /v1/chat/completions
             const chain = [];
-            for (const n of ['openrouter', 'nvidia', 'groq', 'cohere', 'lmstudio', 'ollama']) {
+            for (const n of [...ACTIVE_CLOUD_PROVIDERS, 'lmstudio', 'ollama']) {
               const p = PROVIDERS[n];
               if (p && (p.api_key || n === 'lmstudio' || n === 'ollama')) chain.push(n);
             }
@@ -1134,9 +1142,7 @@ async function startOrchestratorAPI() {
             const t = LOGICAL_TO_REAL[payload.model];
             addCand(t.provider, t.model, 'logical');
           }
-          for (const n of ['openrouter', 'nvidia', 'groq', 'cohere', 'gemini',
-                           'mistral', 'qwen', 'siliconflow', 'zai', 'deepseek',
-                           'venice', 'opencode']) {
+          for (const n of ACTIVE_CLOUD_PROVIDERS) {
             const p = PROVIDERS[n];
             if (p && p.api_key) addCand(n, p.default_model, 'chain-cloud');
           }
