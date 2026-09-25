@@ -18,7 +18,8 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
-const { exec } = require('child_process');
+const { exec, execFile } = require('child_process');
+const MAIND_DB = process.env.MAIND_DB || '/Users/davidnows/sinkia-memory/data/memory.db';
 const { promisify } = require('util');
 
 const execAsync = promisify(exec);
@@ -1283,6 +1284,31 @@ async function startOrchestratorAPI() {
             'high', ['rotating_light', 'robot']);
           res.writeHead(500); res.end(JSON.stringify({ error: err.message, _tried: triedProviders }));
         }
+      });
+      return;
+    }
+
+    // GET/POST /api/orchestrator/recall — MAIND recall (memoria de retorno)
+    // Cualquier agente/servicio del cuerpo puede consultar la memoria global
+    // por texto libre (FTS5). Ej: /api/orchestrator/recall?q=omniroute&k=6
+    if (req.url.startsWith('/api/orchestrator/recall')) {
+      const u = new URL('http://localhost' + req.url);
+      const q = (u.searchParams.get('q') || '').trim();
+      const k = Math.min(parseInt(u.searchParams.get('k') || '6', 10) || 6, 25);
+      const appFilter = (u.searchParams.get('app') || '').replace(/'/g, "''");
+      if (!q) { res.writeHead(400); res.end(JSON.stringify({ error: 'parámetro q requerido' })); return; }
+      const safeQ = q.replace(/'/g, "''");
+      const sql = 'SELECT d.content, d.source, d.app, d.doc_type, d.tags, d.created_at '
+        + 'FROM documents_fts f JOIN documents d ON d.id = f.rowid '
+        + "WHERE documents_fts MATCH '" + safeQ + "' "
+        + (appFilter ? "AND d.app = '" + appFilter + "' " : '')
+        + 'ORDER BY rank LIMIT ' + k + ';';
+      logEvent('info', 'recall q="' + q.slice(0, 60) + '" k=' + k + (appFilter ? ' app=' + appFilter : ''));
+      execFile('/usr/bin/sqlite3', ['-json', MAIND_DB, sql], { timeout: 5000, maxBuffer: 2 * 1024 * 1024 }, (err, stdout) => {
+        if (err) { res.writeHead(500); res.end(JSON.stringify({ error: err.message.slice(0, 200) })); return; }
+        let rows = []; try { rows = JSON.parse((stdout || '').trim() || '[]'); } catch (_) { rows = []; }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ query: q, count: rows.length, results: rows }, null, 2));
       });
       return;
     }

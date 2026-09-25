@@ -57,6 +57,8 @@ ON CONFLICT(content_hash) DO NOTHING;
 // CLI: maind-adapter.js read <bot> <chatId> [n]
 //      maind-adapter.js write <bot> <chatId> <user> <assistant>
 //      maind-adapter.js ping
+module.exports = { readHistory, storeTurn, DB };
+if (require.main === module) {
 const argv = process.argv.slice(2);
 const cmd = argv[0];
 if (cmd === 'ping') {
@@ -77,3 +79,4 @@ if (cmd === 'ping') {
   console.log('uso: maind-adapter.js {ping|read|write} ...');
   process.exit(2);
 }
+} // end if (require.main === module)

@@ -212,7 +212,7 @@ function log(s) { console.log(`[${new Date().toISOString()}] ${s}`); }
     const token = envObj.TELEGRAM_BOT_TOKEN || envObj.OPENCLAW_TELEGRAM_TOKEN || envObj.HERMES_TELEGRAM_TOKEN;
     if (!token) { log(`⚠ ${def.name}: sin token en ${def.envFile}`); continue; }
     const bg = new Tg(def.name, token, OWNER_ID);
-  log(`━━━ ${def.name} ${def.username}  →  ${def.label}  token…${token.slice(-6)} ━━━  (MAIND read+write vía ${os.path.basename(maind.DB || '')})`);
+  log(`━━━ ${def.name} ${def.username}  →  ${def.label}  token…${token.slice(-6)} ━━━  (MAIND read+write vía ${String(maind.DB || '')})`);
     bg.poll().catch(e => log(`[${def.name}] poll crashed: ${e.message}`));
   }
 })().catch(e => { console.error('FATAL', e); process.exit(1); });
