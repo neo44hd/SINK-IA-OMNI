@@ -61,7 +61,7 @@ function spawnP(bin, args, opts = {}) {
   return new Promise((resolve) => {
     const t0 = Date.now();
     const p = spawn(bin, args, {
-      env: { ...process.env, OMNI_BASE_URL: 'http://127.0.0.1:9500', ...opts.env },
+      env: { ...process.env, OMNI_BASE_URL: 'http://127.0.0.1:4000', ...opts.env },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let out = '', err = '';
@@ -105,7 +105,7 @@ async function runClaudeShim(text) {
 }
 
 // 3) Hermes Agent CLI NATIVO vía hermes-shim. El shim fija
-//    ANTHROPIC_BASE_URL=http://127.0.0.1:9500 para que Hermes use OmniRoute
+//    ANTHROPIC_BASE_URL=http://127.0.0.1:4000 para que Hermes use OmniRoute
 //    (model free cloud / local) en lugar de Opus-4 directo (sin API key).
 async function runHermesNative(text) {
   const r = await spawnP('/Users/davidnows/bin/hermes-shim/hermes', ['--query', text], { timeoutMs: 130000 });
@@ -172,7 +172,7 @@ class Tg {
     // MAIND read: traer últimos N turnos (cross-session) como contexto inline
     let contextBlock = '';
     try {
-      const rows = await maind.readHistory(this.name, String(msg.chat.id), 6);
+      const rows = (await maind.readHistory(this.name, String(msg.chat.id), 6)).filter(r => !isNoise(r.content));
       if (rows.length) {
         const slim = rows.map(r => ({ role: r.role, txt: (r.content || '').slice(0, 480) }));
         contextBlock = '\n\n— Contexto previo (MAIND, últimos ' + slim.length + ' turnos) —\n' +
@@ -184,14 +184,23 @@ class Tg {
     const elapsed = Math.round((Date.now() - t0) / 1000);
     log(`[${this.name}] ← ${reply.length} chars in ${elapsed}s`);
     // MAIND store: persistir el turno (no bloquea si falla)
-    maind.storeTurn(this.name, String(msg.chat.id), text, reply)
-      .then(r => log(`[${this.name}] MAIND storeTurn ok=${r.ok} user+assistant`))
-      .catch(e => log(`[${this.name}] MAIND ERR ${e.message}`));
+    if (isNoise(reply)) {
+      log(`[${this.name}] MAIND storeTurn omitido (respuesta de error/TUI)`);
+    } else {
+      maind.storeTurn(this.name, String(msg.chat.id), text, reply)
+        .then(r => log(`[${this.name}] MAIND storeTurn ok=${r.ok} user+assistant`))
+        .catch(e => log(`[${this.name}] MAIND ERR ${e.message}`));
+    }
     // Prefijo de origen
     const head = `◆ ${bot.label}  ·  ${elapsed}s\n`;
     await this.send(msg.chat.id, (head + (reply || '(sin respuesta)').slice(0, 3700)));
   }
 }
+
+// Respuestas que NO deben entrar en la memoria MAIND: errores de shims/modelos, timeouts y
+// volcados de la TUI de Hermes (llevan el contexto previo anidado y se auto-amplifican).
+const NOISE_RE = /^\((OpenClaw|Claude|Hermes)[^)]*?(error|timeout|sin salida)|shim[:\[]|Unknown model|Invalid model name|Agent run failed|Request timed out|Initializing agent|— Contexto previo \(MAIND/i;
+function isNoise(s) { return NOISE_RE.test(String(s || '')); }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function log(s) { console.log(`[${new Date().toISOString()}] ${s}`); }

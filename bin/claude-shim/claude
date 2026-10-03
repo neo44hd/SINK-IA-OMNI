@@ -10,8 +10,21 @@
 //     OMNI_FAST=1; sin eso usa "local-claude-code" (lmstudio)
 'use strict';
 const http = require('http');
-const OMNI = process.env.OMNI_BASE_URL || 'http://127.0.0.1:9500';
+const OMNI = process.env.OMNI_BASE_URL || 'http://127.0.0.1:4000';
 const USE_FAST = process.env.OMNI_FAST === '1';
+// Modelos de LiteLLM (:4000). Los nombres 'local-claude-code'/'local-fast' eran del hub omniroute (:9500).
+const MODEL_DEFAULT = process.env.CLAUDE_SHIM_MODEL || 'meta/llama-3.2-11b-vision-instruct';
+const MODEL_FAST = process.env.CLAUDE_SHIM_FAST_MODEL || 'meta-llama/Llama-3.1-8B-Instruct';
+
+// Clave de LiteLLM: env LITELLM_API_KEY, o la del provider 'gateway' de OpenClaw (nunca hardcodeada aquí).
+function litellmKey() {
+  if (process.env.LITELLM_API_KEY) return process.env.LITELLM_API_KEY;
+  try {
+    const p = require('path').join(require('os').homedir(), '.openclaw', 'openclaw.json');
+    const k = JSON.parse(require('fs').readFileSync(p, 'utf8')).models.providers.gateway.apiKey;
+    return typeof k === 'string' ? k : '';
+  } catch (_) { return ''; }
+}
 
 function die(msg, code = 1) { console.log(`claude-shim: ${msg}`); process.exit(code); }
 
@@ -19,8 +32,11 @@ function postChat(body) {
   return new Promise((resolve, reject) => {
     const data = Buffer.from(JSON.stringify(body));
     const r = http.request({
-      method: 'POST', host: '127.0.0.1', port: 9500, path: '/v1/chat/completions',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': data.length }
+      method: 'POST', host: '127.0.0.1', port: 4000, path: '/v1/chat/completions',
+      headers: Object.assign(
+        { 'Content-Type': 'application/json', 'Content-Length': data.length },
+        litellmKey() ? { 'Authorization': 'Bearer ' + litellmKey() } : {}
+      )
     }, res => {
       let buf = ''; res.on('data', c => buf += c);
       res.on('end', () => { try { resolve(JSON.parse(buf)); } catch (_) { reject(new Error(`bad json: ${buf.slice(0,200)}`)); } });
@@ -54,7 +70,7 @@ function postChat(body) {
   const sys = `Eres Claude Code (claude.com/claude-code) ejecutándose dentro del wrapper claude-shim v1.1, gestionado por SynK-IA-OMNI vía OmniRoute relay (http://127.0.0.1:9500). Usuario: David (id 5665555949). Responde DIRECTO sin thinking previo, en español salvo que pidan otro idioma.`;
 
   const out = await postChat({
-    model: USE_FAST ? 'local-fast' : 'local-claude-code',
+    model: USE_FAST ? MODEL_FAST : MODEL_DEFAULT,
     max_tokens: 600,
     temperature: 0.2,
     messages: [{ role: 'system', content: sys }, { role: 'user', content: prompt }]

@@ -36,7 +36,7 @@ function runAgent(message, timeoutSec, useLocal) {
     // Fijamos agente + modelo para no heredar un modelo persistido de una
     // sesión antigua (p.ej. 'gateway/cloud-auto', ya inexistente).
     const agentId = process.env.OC_AGENT || 'superheroe';
-    const modelId = process.env.OC_MODEL || 'omniroute/auto';
+    const modelId = process.env.OC_MODEL || 'nvidia/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning';
     args.push('--agent', agentId, '--model', modelId);
     args.push('--message', message, '--timeout', String(timeoutSec));
     const p = spawn(REAL_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
